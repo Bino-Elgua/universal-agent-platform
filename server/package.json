@@ -1,5 +1,5 @@
 {
-  "name": "@grokbot/server",
+  "name": "@universal-agent-platform/server",
   "private": true,
   "type": "module",
   "scripts": {

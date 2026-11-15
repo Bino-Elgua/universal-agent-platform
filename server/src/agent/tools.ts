@@ -3,6 +3,7 @@ import { newId } from '../lib/ids.js';
 import { hub } from '../lib/hub.js';
 import { box } from '../box.js';
 import { env } from '../env.js';
+import { isProviderConfigured, requireProvider, type OptionalProvider } from '../providers.js';
 import { appendRow, getBotRow, listRoutines, toRoutine, describeCron } from '../store.js';
 import { executeComposio, innerToolSlugs, isReadOnlySlug, toolkitInfo } from '../composio.js';
 import { scheduleRoutine, unscheduleRoutine } from '../routines.js';
@@ -30,6 +31,7 @@ export interface ToolResult {
 type Impl = (args: any, ctx: ToolCtx) => Promise<ToolResult>;
 
 interface ToolDef {
+  provider?: OptionalProvider;
   name: string;
   description: string;
   parameters: Record<string, unknown>;
@@ -46,6 +48,7 @@ function botByName(userId: string, name: string) {
 
 /** Live X research through xAI's search tool. Returns the answer text followed by the posts it cites. */
 async function xSearch(a: any): Promise<string> {
+  requireProvider('xai');
   const clean = (v: unknown) => (Array.isArray(v) ? v.map((h) => String(h).replace(/^@/, '').trim()).filter(Boolean).slice(0, 10) : []);
   const tool: Record<string, unknown> = { type: 'x_search' };
   const only = clean(a.handles);
@@ -89,7 +92,7 @@ async function xSearch(a: any): Promise<string> {
 /** Where each bot's Library lives on the shared computer. */
 export const LIBRARY_ROOT = '/root/grokbot/files';
 
-export const TOOLS: ToolDef[] = [
+const ALL_TOOLS: ToolDef[] = [
   {
     name: 'save_file',
     description: "Save a finished deliverable (report, notes, CSV, code, markdown) to your Library so the user can open and download it. Saved under /root/grokbot/files/<your id>/ on your computer. Files you write into that folder yourself show up in the Library too.",
@@ -105,6 +108,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'x_search',
+    provider: 'xai',
     description: "Research X (Twitter) live: what people are posting about a topic, what is going viral, reactions to news, or one account's recent posts. Returns a written answer with links to the posts. Ask one focused question per call and say what you want back, e.g. \"the 10 most-engaged posts about AI agents from the last 48 hours, with author, likes and link\".",
     parameters: obj({
       query: { type: 'string', description: 'What to find out, in plain words.' },
@@ -139,6 +143,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'list_event_triggers',
+    provider: 'composio',
     description: 'List the event triggers a connected app offers (e.g. new email, new Slack message, new GitHub PR), with each trigger\'s config fields. Use before create_event_routine.',
     parameters: obj({ toolkit: { type: 'string', description: 'Composio toolkit slug, e.g. gmail, slack, github, googlecalendar' } }, ['toolkit']),
     activity: 'connecting_service',
@@ -147,6 +152,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'create_event_routine',
+    provider: 'composio',
     description: 'Create a routine that runs whenever an event happens in a connected app (instead of on a schedule). `trigger_slug` comes from list_event_triggers; `config_json` is a JSON object string with that trigger\'s config fields (use "{}" if none). `prompt` is what you will do each time, given the event payload.',
     parameters: obj({ name: { type: 'string' }, prompt: { type: 'string' }, trigger_slug: { type: 'string' }, config_json: { type: 'string' } }, ['name', 'prompt', 'trigger_slug']),
     activity: 'working',
@@ -312,6 +318,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'request_app_connection',
+    provider: 'composio',
     description: 'Ask the user to connect an app (e.g. gmail, googlecalendar, slack, github, notion, linear) so you can use it. Use the Composio toolkit slug.',
     parameters: obj({ toolkit: { type: 'string' }, reason: { type: 'string' } }, ['toolkit', 'reason']),
     activity: 'connecting_service',
@@ -325,7 +332,10 @@ export const TOOLS: ToolDef[] = [
   },
 ];
 
-export const toolMap = new Map(TOOLS.map((t) => [t.name, t]));
+// Do not advertise tools whose required optional provider is disabled. Keep their
+// dispatch entries so stale clients receive the precise provider configuration error.
+export const TOOLS = ALL_TOOLS.filter((tool) => !tool.provider || isProviderConfigured(tool.provider));
+export const toolMap = new Map(ALL_TOOLS.map((t) => [t.name, t]));
 
 // ---------- approvals policy ----------
 

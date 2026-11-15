@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Toolkit } from '@shared/types';
-import { BotAvatarFor } from '../../avatar/BotAvatar';
+import { isProviderConfigured, providerRecovery } from '../../lib/providers';
 import { api, openPopup, type AppsResponse } from '../../lib/api';
 import { useStore } from '../../store';
 import { Icon } from '../Icon';
@@ -91,7 +91,7 @@ function Section({ title, apps, onViewAll, onChanged }: { title: string; apps: T
 export function ConnectAppsModal() {
   const setModal = useStore((s) => s.setModal);
   const connectionsVersion = useStore((s) => s.connectionsVersion);
-  const primary = useStore((s) => s.bots.find((b) => b.isPrimary));
+  const configured = useStore((s) => isProviderConfigured(s.providers, 'composio'));
   const close = useCallback(() => setModal(null), [setModal]);
   const [view, setView] = useState<View>({ kind: 'all' });
   const [search, setSearch] = useState('');
@@ -107,6 +107,7 @@ export function ConnectAppsModal() {
   useEffect(() => { const t = setTimeout(() => setDebounced(search.trim()), 200); return () => clearTimeout(t); }, [search]);
 
   useEffect(() => {
+    if (!configured) { setData(null); setLoading(false); return; }
     let alive = true;
     setLoading(true); setError(null);
     const category = view.kind === 'category' ? view.category : '';
@@ -115,22 +116,22 @@ export function ConnectAppsModal() {
       .catch((e) => { if (alive) setError(e.message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [debounced, view, connectionsVersion, bump]);
+  }, [debounced, view, connectionsVersion, bump, configured]);
 
   // Connected list (for the header chip and the Connected view): resolve the connected slugs to full entries.
   useEffect(() => {
-    if (!data) return;
+    if (!configured || !data) return;
     const missing = data.connected.filter((s) => !data.apps.some((a) => a.slug === s));
     if (!missing.length) { setConnectedApps(data.apps.filter((a) => a.connected)); return; }
     let alive = true;
     Promise.all(data.connected.map((s) => api.apps(s).then((r) => r.apps.find((a) => a.slug === s)).catch(() => undefined)))
       .then((list) => { if (alive) setConnectedApps(list.filter((a): a is Toolkit => !!a)); });
     return () => { alive = false; };
-  }, [data]);
+  }, [data, configured]);
 
   // Refresh after the OAuth popup reports back.
   useEffect(() => {
-    const onMsg = (e: MessageEvent) => { if ((e.data as { type?: string })?.type === 'grokbot-connected') refresh(); };
+    const onMsg = (e: MessageEvent) => { if ((e.data as { type?: string })?.type === 'uap-connected') refresh(); };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
   }, [refresh]);
@@ -141,8 +142,16 @@ export function ConnectAppsModal() {
   const activeCategory = view.kind === 'category' ? view.category : null;
   const moreActive = activeCategory !== null && !PILLS.some((p) => p.category === activeCategory);
 
+  if (!configured) return (
+    <Modal onClose={close} className="apps-modal" label="Connect Apps">
+      <button type="button" className="modal__close apps-modal__close" onClick={close} aria-label="Close"><Icon name="close" size={16} /></button>
+      <div className="apps-modal__head"><h2>App connections</h2></div>
+      <div className="apps-empty" role="status">{providerRecovery.composio}</div>
+    </Modal>
+  );
+
   let body: React.ReactNode;
-  if (error) body = <div className="apps-empty">Couldn’t load apps. {error}</div>;
+  if (error) body = <div className="apps-empty" role="alert">Couldn’t load apps. {error} <button type="button" className="link-btn" onClick={refresh}>Retry apps</button></div>;
   else if (!data && loading) body = <div className="apps-empty">Loading apps…</div>;
   else if (view.kind === 'connected') body = connectedApps.length ? <Section title="Connected" apps={connectedApps} onChanged={refresh} /> : <div className="apps-empty">No apps connected yet.</div>;
   else if (searching || view.kind === 'category') {
@@ -185,11 +194,6 @@ export function ConnectAppsModal() {
               <Icon name="search" size={14} opacity={0.56} />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search apps and skills" aria-label="Search apps" />
             </label>
-            <button type="button" className="pill-chip" title="Bot templates are coming soon" disabled>
-              {primary && <BotAvatarFor bot={primary} size={22} />}
-              <span>Bot templates</span>
-              <Icon name="share" size={12} opacity={0.56} />
-            </button>
           </div>
           <div className="cat-pills">
             <button type="button" className={`cat-pill${view.kind === 'all' ? ' is-active' : ''}`} onClick={() => setView({ kind: 'all' })}>All</button>

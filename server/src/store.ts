@@ -31,8 +31,9 @@ export function toBot(r: any): Bot {
     voice: r.voice ?? 'luna',
     voiceSpeed: r.voice_speed ?? 1,
     voiceLanguage: r.voice_language ?? 'auto',
-    model: r.model ?? null,
-    provider: r.provider ?? null,
+    // Historical SQLite hints are not gateway configuration; EngineInfo reports live metadata.
+    model: null,
+    provider: null,
     generation: r.generation,
     unread: r.unread,
     lastPreview: lastPreview ? lastPreview.slice(0, 140) : null,

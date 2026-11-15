@@ -366,8 +366,8 @@ async function runTurn(botId: string, trigger: Trigger) {
       signal: ctrl.signal,
       headers: { 'content-type': 'application/json', accept: 'text/event-stream', ...(engine.key ? { authorization: `Bearer ${engine.key}` } : {}) },
       body: JSON.stringify({
-        model: bot.model || 'hermes-agent',
-        ...(bot.provider ? { provider: bot.provider } : {}),
+        // Resolve the real model/provider from Hermes configuration, never stale local hints.
+        model: 'hermes-agent',
         input,
         instructions: await instructionsFor(userId, botId),
         // One engine-side thread per conversation; "New chat" bumps the generation and starts another.

@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "repository": "https://github.com/nickvasilescu/parallax",
+      "commit": "f1bad631c83ba528216466c551a0a42e816cb9a2",
+      "checkout": "/workspace/upstreams/parallax",
+      "observed_date": "2026-11-15",
+      "inspection": "static source only; code/dependency installation/tests not executed",
+      "top_level_license": "MIT",
+      "license_sha256": "62679713ea2a576199fa4336de477b048c2979f751532edef529d78b707a189f",
+      "integration_status": "not integrated; not enabled"
+    },
+    {
+      "repository": "https://github.com/bugbasesecurity/cloud-attack-range",
+      "commit": "2542e81d8c0a14cea44c918ce4c28354792a4763",
+      "checkout": "/workspace/upstreams/cloud-attack-range",
+      "observed_date": "2026-11-15",
+      "inspection": "static source only; code/dependency installation/tests not executed",
+      "top_level_license": "Apache-2.0",
+      "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "integration_status": "not integrated; not enabled"
+    },
+    {
+      "repository": "https://github.com/cryptonomicsed-byte/sid",
+      "commit": "756d8d8ecb36c359ee1ebfe9bd7772a42ec37418",
+      "checkout": "/workspace/upstreams/sid",
+      "observed_date": "2026-11-15",
+      "inspection": "static source only; code/dependency installation/tests not executed",
+      "top_level_license": "MIT",
+      "license_sha256": "d702910372fcddf76b0011570df0132abba7b450d838bad55920d2da6cbe5b4a",
+      "integration_status": "not integrated; not enabled"
+    },
+    {
+      "repository": "https://github.com/msitarzewski/agency-agents",
+      "commit": "8ae6164602c95ca78828b148b9052460ee426885",
+      "checkout": "/workspace/upstreams/agency-agents",
+      "observed_date": "2026-11-15",
+      "inspection": "static source only; code/dependency installation/tests not executed",
+      "top_level_license": "MIT",
+      "license_sha256": "9a45258434d5cedf0af73c9ad4771373701225038d246c49219026c33677f66f",
+      "integration_status": "not integrated; not enabled"
+    },
+    {
+      "repository": "https://github.com/bugbasesecurity/pentest-copilot",
+      "commit": "cd512edd037a32ddb1df3caf2672915bd555daec",
+      "checkout": "/workspace/upstreams/pentest-copilot",
+      "observed_date": "2026-11-15",
+      "inspection": "static source only; code/dependency installation/tests not executed",
+      "top_level_license": "MIT",
+      "license_sha256": "d2b5e9e5dc23564f1bcb5948731be9b2756a46b716af4764ca12275eb5683d26",
+      "integration_status": "not integrated; not enabled"
+    },
+    {
+      "repository": "https://github.com/NousResearch/hermes-agent",
+      "commit": "4162ecf11f611400fa6e5c42d2f360188ce50b39",
+      "checkout": "/workspace/upstreams/hermes-agent",
+      "observed_date": "2026-11-15",
+      "inspection": "static model API source only; code/dependency installation/tests not executed",
+      "top_level_license": "MIT",
+      "license_sha256": "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6",
+      "integration_status": "Bot HQ already connects gateway; reviewed modern model API not live-tested"
+    }
+  ],
+  "missing_inputs": [
+    "OKF security pipeline source archive",
+    "user-specific Agency Agents fork URL/access"
+  ]
+}

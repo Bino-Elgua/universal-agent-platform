@@ -1,3 +1,4 @@
+import type { ProviderConfiguration } from './providers';
 import type { Bot, ComputerState, LiveState, Routine, Row, Toolkit, User } from '@shared/types';
 
 export class ApiError extends Error {
@@ -25,7 +26,7 @@ export interface AppsResponse { apps: Toolkit[]; connected: string[]; categories
 export interface RoomMember { id: string; name: string; label: string; avatarShape: string; avatarColor: string }
 
 export const api = {
-  me: () => req<{ user: User | null; devLogin: boolean }>('GET', '/auth/me'),
+  me: () => req<{ user: User | null; devLogin: boolean; googleLogin: boolean; providers: ProviderConfiguration }>('GET', '/auth/me'),
   devLogin: (email: string, name?: string) => req<{ ok: true }>('POST', '/auth/dev', { email, name }),
   logout: () => req<{ ok: true }>('POST', '/auth/logout'),
 
@@ -61,5 +62,5 @@ export function openPopup(url: string) {
   const w = 520, h = 680;
   const left = window.screenX + (window.outerWidth - w) / 2;
   const top = window.screenY + (window.outerHeight - h) / 2;
-  return window.open(url, 'grokbot-connect', `width=${w},height=${h},left=${left},top=${top}`);
+  return window.open(url, 'uap-connect', `width=${w},height=${h},left=${left},top=${top}`);
 }

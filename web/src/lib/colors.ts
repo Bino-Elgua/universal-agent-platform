@@ -8,17 +8,17 @@ export interface BotPalette { fill: string; bubble: string; action: string; hove
 
 export const BOT_COLORS: Record<AvatarColor, BotPalette> = {
   // Black follows the theme (ink on light, light ink on dark), so it uses tokens instead of hex.
-  black: { fill: '#000000', bubble: 'var(--color-bubble-user)', action: 'var(--color-primary)', hover: 'var(--color-bg-primary-hover)' },
-  brown: { fill: '#A06B39', bubble: '#86592E', action: '#9D6937', hover: '#86592E' },
-  red: { fill: '#FB2B3E', bubble: '#C82532', action: '#E72E3B', hover: '#C82532' },
-  orange: { fill: '#FD690F', bubble: '#D2550A', action: '#EE620D', hover: '#D2550A' },
-  yellow: { fill: '#F59312', bubble: '#C2730B', action: '#DA830E', hover: '#C2730B' },
-  green: { fill: '#14C16F', bubble: '#0D9655', action: '#10AB61', hover: '#0D9655' },
-  cyan: { fill: '#13B7A2', bubble: '#0D9381', action: '#10A693', hover: '#0D9381' },
-  blue: { fill: '#1E86FC', bubble: '#126FD4', action: '#1680F3', hover: '#126FD4' },
-  violet: { fill: '#8F59F9', bubble: '#7442D1', action: '#8351E4', hover: '#7442D1' },
-  magenta: { fill: '#F93498', bubble: '#C82779', action: '#E52F8B', hover: '#C82779' },
-  gray: { fill: '#959595', bubble: '#6E6E6E', action: '#7A7A7A', hover: '#6E6E6E' },
+  black: { fill: '#182F3A', bubble: 'var(--color-bubble-user)', action: 'var(--color-primary)', hover: 'var(--color-bg-primary-hover)' },
+  brown: { fill: '#846347', bubble: '#60452F', action: '#715138', hover: '#60452F' },
+  red: { fill: '#B7494D', bubble: '#903238', action: '#A23D43', hover: '#903238' },
+  orange: { fill: '#BE6A30', bubble: '#88481E', action: '#A95827', hover: '#88481E' },
+  yellow: { fill: '#B88C23', bubble: '#735511', action: '#8F6B16', hover: '#735511' },
+  green: { fill: '#3D8864', bubble: '#276346', action: '#327752', hover: '#276346' },
+  cyan: { fill: '#27868B', bubble: '#1B6066', action: '#22747A', hover: '#1B6066' },
+  blue: { fill: '#3E74A8', bubble: '#2A547F', action: '#346593', hover: '#2A547F' },
+  violet: { fill: '#7961AA', bubble: '#59427E', action: '#695096', hover: '#59427E' },
+  magenta: { fill: '#A75588', bubble: '#7A3862', action: '#914875', hover: '#7A3862' },
+  gray: { fill: '#73838B', bubble: '#4C5E67', action: '#5C707A', hover: '#4C5E67' },
 };
 
 /** Swatch order in the Create New Bot picker. */

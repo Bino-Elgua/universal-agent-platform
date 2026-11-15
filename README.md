@@ -1,196 +1,66 @@
-<p align="center">
-  <img src="assets/readme-banner.svg" alt="Bot HQ. Your team. Their own computers." width="100%">
-</p>
+# Universal Agent Platform
 
-<p align="center">
-  A team of AI agents you chat with, each with its own screen on one cloud computer.<br>
-  <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a> runs the bots, <a href="https://orgo.ai">Orgo</a> gives them screens, <a href="https://composio.dev">Composio</a> connects their apps, and <a href="https://x.ai">xAI</a> gives them a voice and research on X.
-</p>
+An implementation of the [Master Blueprint v2](docs/implementation/master-blueprint-v2.md), based on Bot HQ commit `decf9a215cddd8792a5f20f4a11a87d4dffa6d15`. Development is in progress. The commercial SaaS, billing, marketplace, security, simulation and creative modules are not released.
 
-<p align="center">
-  <a href="#what-you-get">What you get</a> ·
-  <a href="#how-it-fits-together">How it works</a> ·
-  <a href="#install-on-the-computer">Install</a> ·
-  <a href="#run-it-locally">Run locally</a> ·
-  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
-  <a href="#status-and-limits">Limits</a>
-</p>
+This checkout currently supports the upstream **single-owner self-hosted architecture**. It shares the owner's computer and operating-system identity; agent screens are not security sandboxes. Hosted multi-tenant operation remains blocked until the data, credential and runtime isolation gates pass.
 
-<p align="center">
-  <img alt="Node 22 or newer" src="https://img.shields.io/badge/node-%E2%89%A522-3c873a">
-  <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-1c1c1c">
-  <img alt="Status: experimental" src="https://img.shields.io/badge/status-experimental-fd690f">
-</p>
+See [implementation evidence](docs/implementation/STATUS.md), [tenant audit](docs/implementation/tenant-audit.md), and [candidate source review](docs/implementation/source-inventory.md) for what has actually been inspected and tested.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/chat-dark.png">
-    <img src="assets/screenshots/chat-light.png" alt="A chat with a bot. The bot's steps are listed while it works, its screen is live in the side panel, and the Engine panel shows its model." width="100%">
-  </picture>
-</p>
+## Local setup
 
----
+Requirements: Node.js 22 or newer, npm, and an operational Hermes API gateway for agent reasoning. Building and starting the UI/API does not require paid provider keys. Actual agent turns require the owner's working Hermes model; desktops, connected apps and voice require their configured providers.
 
-Give a bot a job, connect the apps it needs, and follow its work in chat. Each bot has a name, a look, its own memory, and a screen you can watch or take over. Bots can message each other, run recurring tasks, and talk with you over voice.
-
-The interface is modeled on Grok Bot. Underneath, every bot is a Hermes agent, so it can run on the model subscriptions you already pay for (Claude, ChatGPT, Grok and others) or on API keys.
-
-## What you get
-
-| | |
-|---|---|
-| **Chat that shows the work** | While a bot works you see what it is doing right now, how long it has been at it, and each step it took. Finished turns fold into a "Worked for 2m 10s · 7 steps" chip you can open. |
-| **A screen per bot** | Every bot has its own desktop on the shared computer. Watch it live in the side panel, open it full size, or take control with your own mouse and keyboard. |
-| **Your existing Hermes agent, kept as it is** | The first bot is the Hermes agent already running on the computer. Its messaging channels, skills and memory keep working; the app only calls its API. |
-| **Connected apps with approvals** | Bots ask for the app they need and you connect it through Composio. Actions that write (send, post, delete) wait for your OK on a card in the chat. |
-| **Model and subscription per bot** | Pick the provider and model in the bot's Engine panel, or sign in to a subscription on the bot's own screen. |
-| **Voice** | Talk to a bot with xAI's realtime voice modes. Real work is handed to the same bot, with the same memory and tools. |
-| **Research on X** | Every bot has an `x_search` tool, backed by xAI. |
-| **Routines, tasks and a Library** | Recurring jobs on a schedule, a task list per bot, and a place where bots save the files they make. |
-
-<table>
-  <tr>
-    <td width="50%"><img src="assets/screenshots/viewer.png" alt="The full-size viewer showing a bot's Chrome window, live."></td>
-    <td width="50%"><img src="assets/screenshots/home-screen.jpg" alt="A bot's home screen: clock, the bot's name and role, and its apps."></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Watching a bot's screen live</sub></td>
-    <td align="center"><sub>Each screen is dressed as that bot's own computer</sub></td>
-  </tr>
-</table>
-
-<sub>The chat screenshot at the top uses the sample data built into the dev server (add <code>?fixtures</code> to the URL). The two above are from a running install.</sub>
-
-## How it fits together
-
-```mermaid
-flowchart LR
-  B["Browser<br/>chat · viewer · voice"] -- "HTTP + SSE" --> S["Bot HQ server<br/>Node · Hono · SQLite"]
-  B -- "WebSocket (VNC)" --> S
-  S -- "POST /v1/responses" --> H1["Hermes gateway<br/>first bot (already running)"]
-  S -- "POST /v1/responses" --> H2["Hermes gateway<br/>one per extra bot"]
-  H1 -- "MCP /mcp/primary" --> S
-  H2 -- "MCP /mcp/&lt;bot&gt;" --> S
-  S --> O["Orgo computer<br/>one screen per bot"]
-  S --> C["Composio<br/>connected apps"]
-  S --> X["xAI<br/>voice · X search"]
-```
-
-- **One computer, one screen per bot.** All bots live on a single Orgo Linux computer. The first bot uses the computer's main screen; each further bot gets an Orgo screen of its own. Orgo allows four screens per computer, so four bots.
-- **The first bot is the Hermes agent that already runs on that computer.** The app talks to its gateway and never restarts it or rewrites its settings.
-- **Every other bot gets its own Hermes home and gateway**, started by the app. Each has its own model, sign-in, memory, browser profile and files.
-- **The app's tools reach Hermes over MCP.** The server exposes `/mcp/<bot>`. Each agent gets connected apps, `x_search`, tasks, routines, the Library, and messages to other bots.
-- **Screens are dressed to look like the bot's own computer**: a light desktop with a dock, and a home screen with the bot's name and apps as Chrome's new tab page.
-
-More detail is in the [architecture guide](docs/ARCHITECTURE.md).
-
-### How this relates to Hermes Bot Mode
-
-Hermes Desktop has its own Bot Mode. Bot HQ uses the same Hermes engine but does **not** use Bot Mode: it has its own bot layer on top of the gateway's HTTP API.
-
-| | Bot HQ | Hermes Bot Mode |
-|---|---|---|
-| A bot is | A separate Hermes home (the first bot is the default profile) | A Hermes profile |
-| Gateways | One per extra bot | One, serving every profile |
-| Transport | HTTP, `/v1/responses` | JSON-RPC over WebSocket |
-| Routines | The app's own scheduler | Hermes cron jobs |
-| Bot to bot | The app's `send_to_bot` tool | Hermes' `message_agent` tool |
-
-So bots made here do not show up in Hermes Desktop's Bots tab, and bots made there do not show up here.
-
-## Install on the computer
-
-The app is meant to run on the same Orgo computer as Hermes.
-
-1. On your machine: `npm ci && scripts/pack.sh hq-app.tgz`. Copy `hq-app.tgz` and `scripts/install-on-computer.sh` to the computer.
-2. In Orgo, create a public URL for port `8787` on that computer.
-3. On the computer, as root:
-
-   ```bash
-   PUBLIC_URL=https://<name>.orgo.dev ORGO_COMPUTER_ID=<uuid> ALLOWED_EMAILS=you@example.com \
-   KEYS_FILE=/root/keys.txt PRIMARY_CDP_URL=http://127.0.0.1:9333 \
-     bash install-on-computer.sh hq-app.tgz
-   ```
-
-   `KEYS_FILE` holds `XAI_API_KEY=` and `COMPOSIO_API_KEY=` lines (and `ORGO_API_KEY=` if Hermes' own `.env` has none); it is deleted after the first install. `PRIMARY_CDP_URL` is only for a main agent that already has its own Chrome. The script installs to `/opt/hq`, adds one supervisor program (`hq-app`), and leaves Hermes alone. Running it again with a newer `hq-app.tgz` upgrades the app and keeps its settings and data.
-4. Give the main agent the app's tools: `python3 /opt/hq/app/scripts/add-hq-to-hermes.py`. It adds one `mcp_servers.hq` entry to Hermes' `config.yaml`, keeps a dated copy of the file, and Hermes picks the change up without a restart. `--remove` takes it out again.
-5. Open the public URL and sign in with Google. If Google sign-in is not set up yet, `bash /opt/hq/app/scripts/sign-in-link.sh you@example.com` on the computer prints a one-time sign-in link.
-
-<details>
-<summary><b>Remove everything</b></summary>
-
-On the computer:
-
-```bash
-python3 /opt/hq/hq-screen.py undress 99                      # main screen back to how it was (99 = its X display)
-python3 /opt/hq/app/scripts/add-hq-to-hermes.py --remove     # take the tools out of Hermes
-supervisorctl stop hq-app && supervisorctl remove hq-app
-rm -rf /etc/supervisor/conf.d/hq-app.conf /opt/hq /var/log/hq /root/grokbot /etc/opt/chrome/policies/managed/hq.json
-```
-
-Then delete the public URL in Orgo. Screens of the other bots are released when you delete those bots in the app.
-
-</details>
-
-## Run it locally
-
-You need **Node.js 22 or newer** and a Hermes gateway with its API server on (`API_SERVER_KEY` in `~/.hermes/.env`).
-
-```bash
-git clone https://github.com/nickvasilescu/bot-hq.git
-cd bot-hq
+```sh
 npm ci
-cp .env.example .env      # fill in the keys; comments in the file explain each one
-npm run dev -w server     # API on :8787
-npm run dev -w web        # app on :5173
+cp .env.example .env
 ```
 
-With `HQ_LOCAL=0` the server reaches the computer through the Orgo API instead of running commands on it, which is enough for development. `DEV_LOGIN=1` enables the email-only sign-in form; never set it on a public address.
+Edit `.env`: replace `SESSION_SECRET` with a securely generated value, set `HERMES_URL` and `HERMES_HOME_PRIMARY` to your existing gateway, and keep `DEV_LOGIN=0`. Optional Orgo, Composio and xAI keys can remain empty. Keys support `<NAME>_FILE` paths; explicitly configured missing or empty secret files fail startup.
 
-`npm run build && npm start` serves the built app from the API port.
-
-The keys you need:
-
-| Key | Used for |
-|---|---|
-| `ORGO_API_KEY`, `ORGO_COMPUTER_ID` | The computer and its screens |
-| `COMPOSIO_API_KEY` | Connected apps |
-| `XAI_API_KEY` | Voice and `x_search` |
-| `SESSION_SECRET` | Sign-in sessions and the tokens agents use to reach `/mcp` |
-
-## Models and subscriptions
-
-Open a bot's details panel, **Engine**. Pick a provider and model there. **Sign in to a subscription** opens a terminal on the bot's screen running Hermes' own sign-in for that provider (for example Claude Pro/Max), so you finish it in the viewer and the bot uses that subscription from then on. Check your provider's terms before running an agent on a consumer subscription.
-
-## Development
-
-```bash
-npm run typecheck       # server and web
+```sh
 npm run build
-node tests/e2e.mjs https://<your-url>    # needs DEV_LOGIN=1, or E2E_SESSION=<session cookie>
+npm start
 ```
 
-The e2e suite creates a temporary bot (with its own Hermes gateway and screen), exercises chat, the browser on its screen, the live viewer, connected apps, voice sessions and settings, then deletes it. It calls real providers.
+For the built UI, set `APP_URL=http://localhost:8787` and open that address. For UI development use `npm run dev` with `APP_URL=http://localhost:5173`. The Vite API proxy defaults to port 8787; override with `UAP_API` if needed. Keep the development server private.
 
-```text
-server/src/         API, Hermes adapter (agent/loop.ts), engines (engine.ts), MCP endpoint (mcp.ts), screens (computer.ts)
-server/box/         what runs on the computer to dress a screen (desktop, dock, home screen, Chrome)
-web/src/            chat, bot settings, app connections, computer viewer, voice
-scripts/            pack, install, Hermes config helper, sign-in link
-tests/              Playwright end-to-end test
-docs/               architecture; the Orgo and xAI/Composio guides predate the Hermes engine
+On the server machine, create the first owner's single-use sign-in link:
+
+```sh
+node --env-file=.env scripts/sign-in-link.mjs owner@example.com
 ```
 
-## Status and limits
+Open the printed link within 15 minutes. Anyone holding it can sign in once, so treat it as a credential. The command sends the setup proof only to the local server. Google sign-in requires Composio and one configured `ALLOWED_EMAILS` owner address for first enrollment. Further sign-ins must match the persisted owner. Development email sign-in is available only when explicitly enabled and does not verify email ownership.
 
-- Experimental, no security audit. Bots share one computer and can reach each other's files there.
-- Approval cards cover Composio write actions. What a bot does through its browser or shell is not gated, and Hermes' own "risky command" prompts are not shown in the app yet.
-- Four bots at most, because of Orgo's four-screen limit.
-- The app still calls itself "Grokbot" in places (page title, package names, the database file).
-- The screen look is an original implementation inspired by OrgoAI/bops; no code or assets from that repository are used.
+## Provider behavior
 
-## License and credits
+- Hermes remains the reasoning authority. The Engine panel reports the gateway-configured default; change provider/model in Hermes and refresh. Historical SQLite model/provider hints are retained but no longer override turns or masquerade as gateway state. Gateway model mutation is unsupported, and its legacy PATCH endpoint returns an explicit 409. This release does not implement remote pairing or tenant-isolated managed hosting.
+- Orgo requires `ORGO_API_KEY` and `ORGO_COMPUTER_ID` for its desktop adapter. `HQ_LOCAL=1` is the existing trusted host mode; it is not the planned isolated `local-linux` provider.
+- Composio is optional for app connections and Google login. The platform's own MCP tools can be discovered without it.
+- xAI is optional for research and voice. Unconfigured controls are disabled or absent; failed provider operations return errors, never fabricated success.
+- Managed agents have separate Hermes homes. Copying primary model configuration, credentials or subscription auth into those homes requires explicit operator opt-in with `HERMES_INHERIT_PRIMARY_CREDENTIALS=1`. Configure credentials in each managed home instead when this is off. Existing private managed credentials are retained. No remote-provider fallback is added by this platform.
+- `/api/health` reports API liveness and `unconfigured` / `configured_unverified` credential status. It does not prove Hermes/model health or provider credential validity.
 
-Project code is available under the [MIT license](LICENSE). The bot artwork and some icons come from Grok Bot's design and remain the property of their owners, as do third-party app logos; the MIT license does not cover them. See [third-party notices](THIRD_PARTY_NOTICES.md).
+## Upgrade and data safety
 
-Continued from [grokbot-clone](https://github.com/nickvasilescu/grokbot-clone). Built with [Hermes Agent](https://github.com/NousResearch/hermes-agent), [Orgo](https://orgo.ai), [Composio](https://composio.dev), and [xAI](https://x.ai). This is an independent project, unaffiliated with xAI, Cursor/Anysphere or Nous Research.
+Stop the server and any managed gateways before taking a consistent backup. Retain the database, its WAL state where applicable, the `data/engines` directory, and operator configuration using access-controlled storage. Verify restoration in a separate installation before upgrading a live one.
+
+Fresh installations default to `data/platform.db`. If only `data/grokbot.db` exists, it remains selected automatically unless `DB_PATH` is explicit; if both names exist, startup requires an explicit `DB_PATH`; the upgrade does not rename it or discard history. Legacy filesystem paths, cookies and environment aliases remain where needed for compatibility. Original browser preferences migrate to `uap.*` without deleting historical keys.
+
+One legacy account retains its stable owner and agent IDs. A database containing multiple users or ambiguous primary bindings stops startup with a repair message. No account is selected or deleted automatically. Back up and separate legacy accounts into isolated installations before running this version. There is no automated multi-account exporter yet.
+
+The owner/primary binding is transactional. Deleting the primary bot leaves the external gateway binding reserved; the next bot cannot silently adopt it. Recovering a deleted primary binding currently requires an offline reviewed repair; it is not a self-service re-pairing feature. This app never automatically restarts or deletes the external primary gateway. Managed-home paths must remain outside the primary home; symlink escapes are rejected. Process shutdown requires Linux `/proc` evidence that a process belongs to the managed home.
+
+Restore the pre-upgrade database and matching source version for rollback. Do not delete binding records or point multiple installations at the same database/computer. These controls reduce current exposure; they do not complete the PostgreSQL migration or hosted isolation requirements.
+
+## Verification
+
+```sh
+npm run check
+```
+
+This runs TypeScript checks, isolated contract/integration tests, the production build and branding hygiene audit. Tests use temporary databases and identified test fixtures. Existing `tests/e2e.mjs` and `tests/voice-call.mjs` require real Hermes/Orgo/xAI/Composio services and can create resources. They are separate release gates; passing local checks does not imply they passed.
+
+Original geometric avatars and a neutral theme replace the upstream excluded artwork. [Third-party notices](THIRD_PARTY_NOTICES.md) retain source attribution. `audit:branding` detects excluded upstream asset hashes and stale bundled asset references; it does not establish trademark clearance or legal approval.
+
+Upstream code remains attributed under [LICENSE](LICENSE). This project is independent of xAI, Cursor/Anysphere, Nous Research and the referenced service providers.

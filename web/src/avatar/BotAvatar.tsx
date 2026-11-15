@@ -1,60 +1,48 @@
 import type { AvatarColor, AvatarShape, Bot } from '@shared/types';
 import { palette } from '../lib/colors';
 import { Icon } from '../components/Icon';
-import { SHAPES, type ShapeDef } from './shapes.gen';
+import { AVATAR_ASSET_VERSION, SHAPES, type ShapeDef } from './shapes.gen';
 
-/** Shapes without an exported SVG fall back to the closest silhouette we have. */
-const FALLBACK: Partial<Record<AvatarShape, string>> = {
-  bean: 'teardrop', squircle: 'square', capsule: 'tablet', cylinder: 'tablet', gem: 'hex', crystal: 'hex',
-  shield: 'house', dome: 'house', arch: 'house', leaf: 'teardrop',
-};
-
+export type AvatarState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'working' | 'success' | 'error' | 'sleep';
 export function shapeDef(shape: AvatarShape | string): ShapeDef {
-  return SHAPES[shape] ?? SHAPES[FALLBACK[shape as AvatarShape] ?? 'blob'] ?? SHAPES.blob;
+  return SHAPES[shape] ?? SHAPES.blob;
 }
-
-/** Shapes offered in the Create New Bot picker, in the design's order (rows of 5/5/3). */
 export const PICKER_SHAPES: AvatarShape[] = ['blob', 'cloud', 'square', 'sparkle', 'clover', 'heart', 'flower', 'teardrop', 'tablet', 'wedge', 'house', 'star', 'hex'];
 
 interface Props {
   shape: AvatarShape | string;
   color: AvatarColor | string;
-  /** Slot size in px. The drawing overflows the slot by the design's 1.533x ratio. */
   size: number;
   star?: boolean;
-  /** Selected-shape ring (white gap + gray outline following the silhouette). */
   ring?: boolean;
+  state?: AvatarState;
   className?: string;
   title?: string;
 }
 
-const OVERDRAW = 55.2 / 36;
-
-export function BotAvatar({ shape, color, size, star, ring, className, title }: Props) {
+/** First-party node badge. Motion expresses activity, never a provider or permissions. */
+export function BotAvatar({ shape, color, size, star, ring, state = 'idle', className, title }: Props) {
   const def = shapeDef(shape);
-  const draw = size * OVERDRAW;
-  const off = (draw - size) / 2;
   const fill = palette(color).fill;
-  // Stroke widths in viewBox units: viewBox width maps to `draw` px.
-  const vbw = Number(def.viewBox.split(/\s+/)[2]);
-  const px = vbw / draw;
   return (
-    <span className={`bot-avatar ${className ?? ''}`} style={{ width: size, height: size }} title={title} role="img" aria-label={title}>
-      <svg width={draw} height={draw} viewBox={def.viewBox} style={{ position: 'absolute', left: -off, top: -off, overflow: 'visible' }} aria-hidden>
-        {ring && <path d={def.outline} fill="#1C1C1C3D" stroke="#1C1C1C3D" strokeWidth={px * 2 * 3.4} strokeLinejoin="round" />}
-        {ring && <path d={def.outline} fill="#FFFFFF" stroke="#FFFFFF" strokeWidth={px * 2 * 2.4} strokeLinejoin="round" />}
-        <path d={def.outline} fill="#FFFFFF" />
-        <path d={def.d} fill={fill} fillRule="evenodd" />
+    <span className={`bot-avatar ${className ?? ''}`} style={{ width: size, height: size }} title={title} role={title ? 'img' : undefined} aria-label={title ? `${title}, ${state}` : undefined} aria-hidden={title ? undefined : true} data-state={state} data-asset-version={AVATAR_ASSET_VERSION}>
+      <svg width={size} height={size} viewBox={def.viewBox} aria-hidden="true" focusable="false">
+        <path d={def.outline} fill={fill} stroke={ring ? 'var(--color-text-primary)' : 'none'} strokeWidth={2} />
+        <g className="bot-avatar__nodes" fill="none" stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M24 24 14 17M24 24l10-7M24 24v11" />
+          <circle cx="14" cy="17" r="3" fill={fill} />
+          <circle cx="34" cy="17" r="3" fill={fill} />
+          <circle cx="24" cy="35" r="3" fill={fill} />
+          <circle cx="24" cy="24" r="4" fill="#FFFFFF" />
+        </g>
+        {state === 'success' && <path d="m17 25 5 5 10-12" fill="none" stroke="#FFFFFF" strokeWidth={3} />}
+        {state === 'error' && <path d="M24 14v14m0 5v1" stroke="#FFFFFF" strokeWidth={3} strokeLinecap="round" />}
       </svg>
-      {star && (
-        <span className="bot-avatar__star" style={{ width: size * 0.2667, height: size * 0.2667 }}>
-          <Icon name="star" size={size * 0.1333} color="#FFFFFF" />
-        </span>
-      )}
+      {star && <span className="bot-avatar__star" style={{ width: size * 0.3, height: size * 0.3 }}><Icon name="star" size={size * 0.2} color="#FFFFFF" /></span>}
     </span>
   );
 }
 
-export function BotAvatarFor({ bot, size, star, className }: { bot: Pick<Bot, 'avatarShape' | 'avatarColor' | 'name'> & { isPrimary?: boolean }; size: number; star?: boolean; className?: string }) {
-  return <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} size={size} star={star} className={className} title={bot.name} />;
+export function BotAvatarFor({ bot, size, star, state, className }: { bot: Pick<Bot, 'avatarShape' | 'avatarColor' | 'name'> & { isPrimary?: boolean }; size: number; star?: boolean; state?: AvatarState; className?: string }) {
+  return <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} size={size} star={star} state={state} className={className} title={bot.name} />;
 }

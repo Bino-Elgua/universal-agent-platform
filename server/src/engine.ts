@@ -6,6 +6,7 @@ import YAML from 'yaml';
 import { displayFor } from './box.js';
 import { cdpUrlFor, screenFor } from './computer.js';
 import { db } from './db.js';
+import { deployment } from './deployment.js';
 import { env } from './env.js';
 import type { EngineInfo, EngineProvider } from './types.js';
 
@@ -60,7 +61,11 @@ export function mcpToken(botId: string): string {
 }
 
 export function primaryBotId(): string | null {
-  return (db.prepare("SELECT id FROM bots WHERE engine='primary' LIMIT 1").get() as any)?.id ?? null;
+  const b = db.prepare("SELECT id, user_id FROM bots WHERE engine='primary' LIMIT 1").get() as any;
+  if (!b) return null;
+  deployment.requireOwner(b.user_id);
+  if (!deployment.assignPrimary(b.id, b.user_id)) throw new Error('Primary Hermes binding does not match this bot.');
+  return b.id;
 }
 
 export function engineKind(botId: string): EngineKind | null {
@@ -68,7 +73,68 @@ export function engineKind(botId: string): EngineKind | null {
   return e === 'primary' || e === 'managed' ? e : null;
 }
 
-const homeFor = (botId: string) => path.join(env.enginesDir, botId);
+/** Resolve existing symlinks even when the final path has not been created yet. */
+function canonicalPath(file: string, seen = new Set<string>()): string {
+  const absolute = path.resolve(file);
+  if (seen.has(absolute)) throw new Error('Cyclic symlink in Hermes home configuration.');
+  seen.add(absolute);
+  try { return fs.realpathSync(absolute); } catch (error: any) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  try {
+    if (fs.lstatSync(absolute).isSymbolicLink()) {
+      return canonicalPath(path.resolve(path.dirname(absolute), fs.readlinkSync(absolute)), seen);
+    }
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  const parent = path.dirname(absolute);
+  if (parent === absolute) throw new Error('Cannot resolve Hermes home configuration.');
+  return path.join(canonicalPath(parent, seen), path.basename(absolute));
+}
+
+function within(child: string, parent: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
+}
+
+/** Managed homes must not overlap, contain, or link into the externally owned primary home. */
+function managedRoot(): string {
+  const primary = canonicalPath(env.hermesHome);
+  const managed = canonicalPath(env.enginesDir);
+  if (within(managed, primary) || within(primary, managed)) {
+    throw new Error('ENGINES_DIR and HERMES_HOME_PRIMARY must be separate, non-overlapping directories.');
+  }
+  return managed;
+}
+
+function homeFor(botId: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(botId)) throw new Error('Invalid agent ID for a managed Hermes home.');
+  const root = managedRoot();
+  const home = canonicalPath(path.join(env.enginesDir, botId));
+  if (home !== path.join(root, botId)) throw new Error('Managed Hermes home escapes or aliases another home in ENGINES_DIR.');
+  return home;
+}
+
+/** Files that we create/read must resolve inside this managed agent's own home. */
+function managedPath(home: string, ...parts: string[]): string {
+  const file = path.join(home, ...parts);
+  if (!within(canonicalPath(file), home)) throw new Error('Managed Hermes file escapes its agent home.');
+  return file;
+}
+
+function ownedBot(botId: string) {
+  const b = botRow(botId);
+  if (!b) throw new Error('bot not found');
+  deployment.requireOwner(b.user_id);
+  return b;
+}
+
+function managedBot(botId: string) {
+  const b = ownedBot(botId);
+  if (b.engine !== 'managed') throw new Error('not a managed engine');
+  return b;
+}
 
 let cachedPrimaryKey: string | null = null;
 function primaryKey(): string {
@@ -86,22 +152,31 @@ function freePort(): number {
   return p;
 }
 
-/** Give a new agent bot its engine: the existing agent if nobody has it yet, otherwise one of our own. */
+/** Bind the primary engine once; deleting its bot never transfers the external agent to another bot. */
 export function assignEngine(botId: string): EngineKind {
-  const b = botRow(botId);
-  if (!b) throw new Error('bot not found');
-  if (b.engine === 'primary' || b.engine === 'managed') return b.engine;
-  if (!primaryBotId()) {
-    db.prepare("UPDATE bots SET engine='primary', engine_port=NULL WHERE id=?").run(botId);
-    return 'primary';
-  }
-  db.prepare("UPDATE bots SET engine='managed', engine_port=? WHERE id=?").run(freePort(), botId);
-  return 'managed';
+  return db.transaction((): EngineKind => {
+    const b = ownedBot(botId);
+    if (b.engine === 'primary') {
+      if (!deployment.assignPrimary(botId, b.user_id)) throw new Error('Primary Hermes binding does not match this bot.');
+      return 'primary';
+    }
+    if (b.engine === 'managed') {
+      homeFor(botId);
+      return 'managed';
+    }
+    if (deployment.assignPrimary(botId, b.user_id)) {
+      db.prepare("UPDATE bots SET engine='primary', engine_port=NULL WHERE id=?").run(botId);
+      return 'primary';
+    }
+    homeFor(botId);
+    db.prepare("UPDATE bots SET engine='managed', engine_port=? WHERE id=?").run(freePort(), botId);
+    return 'managed';
+  })();
 }
 
 // ---------- a managed bot's Hermes home ----------
 
-/** Model credentials a managed agent may inherit from the primary agent. Never messaging tokens. */
+/** Model credentials eligible for the operator's explicit inheritance grant. Never messaging tokens. */
 const SHARED_ENV = [
   'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN',
   'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENROUTER_API_KEY', 'XAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'NOUS_API_KEY',
@@ -124,11 +199,11 @@ function soul(b: any): string {
 
 /** Rewrite the persona file after a rename or a new description. The primary agent keeps its own. */
 export function syncPersona(botId: string) {
-  const b = botRow(botId);
-  if (!b || b.engine !== 'managed') return;
+  const b = ownedBot(botId);
+  if (b.engine !== 'managed') return;
   const home = homeFor(botId);
   if (!fs.existsSync(home)) return;
-  fs.writeFileSync(path.join(home, 'SOUL.md'), soul(b));
+  fs.writeFileSync(managedPath(home, 'SOUL.md'), soul(b));
 }
 
 function extraMcpServers(): Record<string, any> {
@@ -143,11 +218,11 @@ function extraMcpServers(): Record<string, any> {
 }
 
 /** Create or refresh the home. config.yaml is created once; after that only the keys we own are patched. */
-async function writeHome(botId: string): Promise<{ home: string; key: string; display: string | null }> {
-  const b = botRow(botId);
+async function writeHome(botId: string): Promise<{ home: string; key: string; display: string | null; modelSetupRequired: boolean }> {
+  const b = managedBot(botId);
   const home = homeFor(botId);
-  fs.mkdirSync(path.join(home, 'logs'), { recursive: true });
-  fs.mkdirSync(path.join(home, 'locks'), { recursive: true });
+  fs.mkdirSync(managedPath(home, 'logs'), { recursive: true });
+  fs.mkdirSync(managedPath(home, 'locks'), { recursive: true });
   fs.chmodSync(home, 0o700);
 
   // Its screen decides which display and which Chrome it drives. Only meaningful on the computer itself.
@@ -163,15 +238,17 @@ async function writeHome(botId: string): Promise<{ home: string; key: string; di
     }
   }
 
-  const cwd = env.localBox ? `/root/grokbot/files/${botId}` : path.join(home, 'workspace');
+  const cwd = env.localBox ? `/root/grokbot/files/${botId}` : managedPath(home, 'workspace');
   fs.mkdirSync(cwd, { recursive: true });
 
-  const cfgFile = path.join(home, 'config.yaml');
+  const cfgFile = managedPath(home, 'config.yaml');
   const fresh = !fs.existsSync(cfgFile);
   const cfg = fresh ? {} : readYaml(cfgFile);
   if (fresh) {
-    const primary = readYaml(path.join(env.hermesHome, 'config.yaml'));
-    for (const k of SHARED_CONFIG) if (primary[k] !== undefined) cfg[k] = primary[k];
+    if (env.inheritPrimaryCredentials) {
+      const primary = readYaml(path.join(env.hermesHome, 'config.yaml'));
+      for (const k of SHARED_CONFIG) if (primary[k] !== undefined) cfg[k] = primary[k];
+    }
     cfg.agent = { reasoning_effort: 'medium' };
   }
   cfg.platform_toolsets = { ...(cfg.platform_toolsets ?? {}), api_server: ['hermes-api-server', ...(display ? ['computer_use'] : [])] };
@@ -184,29 +261,40 @@ async function writeHome(botId: string): Promise<{ home: string; key: string; di
   };
   writePrivate(cfgFile, YAML.stringify(cfg));
 
-  if (!fs.existsSync(path.join(home, 'SOUL.md'))) fs.writeFileSync(path.join(home, 'SOUL.md'), soul(b));
+  // Mark newly provisioned homes without a model so retries keep reporting setup required.
+  // Existing homes can use Hermes-specific configuration layouts and remain untouched.
+  const setupMarker = managedPath(home, '.uap-model-setup-required');
+  const hasModel = (typeof cfg.model === 'string' && cfg.model.trim().length > 0) ||
+    (cfg.model !== null && typeof cfg.model === 'object' && Object.keys(cfg.model).length > 0);
+  if (fresh && !hasModel) writePrivate(setupMarker, 'Configure a model in this managed Hermes home before starting.\n');
+  if (hasModel && fs.existsSync(setupMarker)) fs.unlinkSync(setupMarker);
+  const modelSetupRequired = fs.existsSync(setupMarker);
 
-  // Subscription sign-ins live in auth.json. Start from the primary agent's; later sign-ins are this bot's own.
-  const auth = path.join(home, 'auth.json');
-  if (!fs.existsSync(auth)) {
+  if (!fs.existsSync(managedPath(home, 'SOUL.md'))) fs.writeFileSync(managedPath(home, 'SOUL.md'), soul(b));
+
+  // Existing managed sign-ins remain private to that home; new copies require an explicit operator grant.
+  const auth = managedPath(home, 'auth.json');
+  if (env.inheritPrimaryCredentials && !fs.existsSync(auth)) {
     try { writePrivate(auth, fs.readFileSync(path.join(env.hermesHome, 'auth.json'), 'utf8')); } catch { /* the primary agent has none */ }
   }
 
-  // .env is ours entirely: the API server plus inherited model keys. Keys the user added by hand are kept.
-  const envFile = path.join(home, '.env');
+  // Keep existing managed keys. Read/copy primary or server model keys only with an explicit grant.
+  const envFile = managedPath(home, '.env');
   const mine = readDotenv(envFile);
   const key = mine.API_SERVER_KEY || crypto.randomBytes(24).toString('hex');
-  const primaryEnv = readDotenv(path.join(env.hermesHome, '.env'));
   const vars: Record<string, string> = { ...mine };
-  for (const k of SHARED_ENV) {
-    const v = primaryEnv[k] ?? process.env[k];
-    if (v && !vars[k]) vars[k] = v;
+  if (env.inheritPrimaryCredentials) {
+    const primaryEnv = readDotenv(path.join(env.hermesHome, '.env'));
+    for (const k of SHARED_ENV) {
+      const v = primaryEnv[k] ?? process.env[k];
+      if (v && !vars[k]) vars[k] = v;
+    }
   }
   Object.assign(vars, { API_SERVER_ENABLED: 'true', API_SERVER_KEY: key, API_SERVER_PORT: String(b.engine_port), API_SERVER_HOST: '127.0.0.1' });
   if (cdp) vars.BROWSER_CDP_URL = cdp; else delete vars.BROWSER_CDP_URL;
   writePrivate(envFile, Object.entries(vars).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');
 
-  return { home, key, display };
+  return { home, key, display, modelSetupRequired };
 }
 
 // ---------- a managed bot's gateway ----------
@@ -225,41 +313,69 @@ async function keyAccepted(url: string, key: string): Promise<boolean> {
   } catch { return false; }
 }
 
-/** The gateway's pid, but only if the pid file belongs to this home and the process is alive. */
+/** A missing/dead process is safe; an existing but unproven process blocks cleanup. */
 function gatewayPid(home: string): number | null {
-  let raw = '';
-  try { raw = fs.readFileSync(path.join(home, 'gateway.pid'), 'utf8').trim(); } catch { return null; }
+  const pidFile = managedPath(home, 'gateway.pid');
+  let raw: string;
+  try { raw = fs.readFileSync(pidFile, 'utf8').trim(); } catch (error: any) {
+    if (error?.code === 'ENOENT') return null;
+    throw new Error('Cannot inspect managed gateway ownership; cleanup is blocked.');
+  }
+  const unproven = () => new Error('Cannot prove this live gateway belongs to the managed Hermes home; cleanup is blocked.');
   let pid = NaN;
   try {
     const j = JSON.parse(raw);
     if (typeof j === 'number') pid = j;
     else {
-      if (j?.hermes_home && path.resolve(j.hermes_home) !== path.resolve(home)) return null;
+      if (j?.hermes_home && canonicalPath(j.hermes_home) !== home) throw unproven();
       pid = Number(j?.pid);
     }
-  } catch { pid = Number(raw); }
-  if (!Number.isInteger(pid) || pid <= 1) return null;
-  try { process.kill(pid, 0); } catch { return null; }
+  } catch (error) {
+    if (/^\d+$/.test(raw)) pid = Number(raw);
+    else throw unproven();
+  }
+  if (!Number.isInteger(pid) || pid <= 1) throw unproven();
+  try { process.kill(pid, 0); } catch (error: any) {
+    if (error?.code === 'ESRCH') return null;
+    throw unproven();
+  }
   try {
-    if (!fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('gateway')) return null;
-  } catch { /* no /proc: trust the pid file */ }
+    if (!fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('gateway')) throw unproven();
+    const ownHome = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').find(v => v.startsWith('HERMES_HOME='))?.slice('HERMES_HOME='.length);
+    if (!ownHome || canonicalPath(ownHome) !== home) throw unproven();
+  } catch { throw unproven(); }
   return pid;
 }
 
 async function stopGateway(botId: string) {
+  managedBot(botId);
   const home = homeFor(botId);
   const pid = gatewayPid(home);
   if (!pid) return;
   const signal = (sig: NodeJS.Signals) => {
-    try { process.kill(-pid, sig); } catch { try { process.kill(pid, sig); } catch { /* gone */ } }
+    // Recheck ownership before every signal; never trust an old pid after an await.
+    if (gatewayPid(home) !== pid) throw new Error('Gateway process changed during shutdown; cleanup is blocked.');
+    try { process.kill(-pid, sig); } catch { try { process.kill(pid, sig); } catch (error: any) {
+      if (error?.code !== 'ESRCH') throw error;
+    } }
+  };
+  const gone = () => {
+    try { process.kill(pid, 0); return false; } catch (error: any) {
+      if (error?.code === 'ESRCH') return true;
+      throw new Error('Cannot confirm gateway shutdown; cleanup is blocked.');
+    }
   };
   signal('SIGTERM');
   for (let i = 0; i < 40; i++) {
     await new Promise((r) => setTimeout(r, 250));
-    try { process.kill(pid, 0); } catch { return; }
+    if (gone()) return;
   }
   signal('SIGKILL');
-  await new Promise((r) => setTimeout(r, 300));
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (gone()) return;
+  }
+  throw new Error('The managed gateway is still running; cleanup is blocked.');
 }
 
 const starting = new Map<string, Promise<void>>();
@@ -273,15 +389,16 @@ function managedUrl(botId: string): string {
 function managedKey(botId: string): string {
   let k = keys.get(botId);
   if (!k) {
-    k = readDotenv(path.join(homeFor(botId), '.env')).API_SERVER_KEY ?? '';
+    const home = homeFor(botId);
+    k = readDotenv(managedPath(home, '.env')).API_SERVER_KEY ?? '';
     if (k) keys.set(botId, k);
   }
   return k;
 }
 
 async function startGateway(botId: string): Promise<void> {
-  const b = botRow(botId);
-  if (!b || b.engine !== 'managed') throw new Error('not a managed engine');
+  const b = managedBot(botId);
+  homeFor(botId); // Validate before contacting or stopping any process.
   if (!b.engine_port) db.prepare('UPDATE bots SET engine_port=? WHERE id=?').run(freePort(), botId);
   const url = managedUrl(botId);
 
@@ -292,11 +409,14 @@ async function startGateway(botId: string): Promise<void> {
     else throw new Error(`Port ${botRow(botId).engine_port} is taken by something else.`);
   }
 
-  const { home, key, display } = await writeHome(botId);
+  const { home, key, display, modelSetupRequired } = await writeHome(botId);
+  if (modelSetupRequired) {
+    throw new Error(`Managed Hermes needs model setup. Configure this agent's model and credentials in ${path.join(home, 'config.yaml')} and its private home, then retry. Primary credentials are not inherited without HERMES_INHERIT_PRIMARY_CREDENTIALS=1.`);
+  }
   keys.set(botId, key);
   if (gatewayPid(home)) await stopGateway(botId);
 
-  const log = fs.openSync(path.join(home, 'logs', 'gateway.out.log'), 'a');
+  const log = fs.openSync(managedPath(home, 'logs', 'gateway.out.log'), 'a');
   const child = spawn(env.hermesBin, ['gateway', 'run', '--no-supervise'], {
     cwd: home,
     detached: true,
@@ -352,14 +472,16 @@ function ensureManaged(botId: string): Promise<void> {
 
 /** Where to send this bot's turns. Starts its gateway if it is not running. */
 export async function engineFor(botId: string): Promise<Engine> {
+  const b = ownedBot(botId);
   let kind = engineKind(botId);
   if (!kind) {
-    const b = botRow(botId);
-    if (!b) throw new Error('bot not found');
     if (b.kind === 'room') throw new Error('A group chat has no agent of its own.');
     kind = assignEngine(botId);
   }
-  if (kind === 'primary') return { kind, url: env.hermesUrl, key: primaryKey(), home: env.hermesHome };
+  if (kind === 'primary') {
+    if (!deployment.assignPrimary(botId, b.user_id)) throw new Error('Primary Hermes binding does not match this bot.');
+    return { kind, url: env.hermesUrl, key: primaryKey(), home: env.hermesHome };
+  }
   const url = managedUrl(botId);
   if (!(await healthy(url, 1500)) || !managedKey(botId)) await ensureManaged(botId);
   return { kind, url, key: managedKey(botId), home: homeFor(botId) };
@@ -367,7 +489,11 @@ export async function engineFor(botId: string): Promise<Engine> {
 
 /** The bot's Hermes home, without starting anything (memory files, sign-in commands). */
 export function engineHome(botId: string): string | null {
+  const b = botRow(botId);
+  if (!b) return null;
+  deployment.requireOwner(b.user_id);
   const kind = engineKind(botId);
+  if (kind === 'primary' && !deployment.assignPrimary(botId, b.user_id)) throw new Error('Primary Hermes binding does not match this bot.');
   return kind === 'primary' ? env.hermesHome : kind === 'managed' ? homeFor(botId) : null;
 }
 
@@ -420,6 +546,8 @@ export async function restartEngine(botId: string): Promise<void> {
 
 /** The bot is gone: stop its gateway and delete its home. The primary agent is left alone. */
 export async function removeEngine(botId: string): Promise<void> {
+  const b = ownedBot(botId);
+  if (b.engine !== 'managed') return;
   const home = homeFor(botId);
   if (!fs.existsSync(home)) return;
   await starting.get(botId)?.catch(() => {});
@@ -427,11 +555,13 @@ export async function removeEngine(botId: string): Promise<void> {
   keys.delete(botId);
   failures.delete(botId);
   optionsCache.delete(botId);
-  if (path.resolve(home).startsWith(path.resolve(env.enginesDir) + path.sep)) fs.rmSync(home, { recursive: true, force: true });
+  homeFor(botId); // Recheck after awaiting shutdown before removing anything.
+  fs.rmSync(home, { recursive: true, force: true });
 }
 
 /** On server start: give older bots an engine, then bring the managed gateways up. */
 export function initEngines() {
+  managedRoot();
   fs.mkdirSync(env.enginesDir, { recursive: true });
   const bots = db.prepare("SELECT id, is_primary FROM bots WHERE engine IS NULL AND COALESCE(kind,'agent') <> 'room' AND COALESCE(hidden,0)=0 ORDER BY is_primary DESC, created_at ASC").all() as any[];
   for (const b of bots) assignEngine(b.id);
@@ -477,10 +607,9 @@ function toProviders(data: any): EngineProvider[] {
 }
 
 export async function engineInfo(botId: string): Promise<EngineInfo> {
-  const b = botRow(botId);
-  if (!b) throw new Error('bot not found');
+  const b = ownedBot(botId);
   const kind = engineKind(botId);
-  const base: EngineInfo = { botId, profile: kind === 'primary' ? 'default' : botId, status: 'stopped', error: null, model: b.model ?? null, provider: b.provider ?? null, version: null, providers: [], ownScreen: kind ? ownScreenOn(botId) : false };
+  const base: EngineInfo = { botId, kind, configurationMode: 'in_hermes', profile: kind === 'primary' ? 'default' : botId, status: 'stopped', error: null, model: null, provider: null, version: null, providers: [], ownScreen: kind ? ownScreenOn(botId) : false };
   if (!kind) return { ...base, status: 'error', error: 'This bot has no agent.' };
 
   let e: { url: string; key: string };
@@ -506,8 +635,9 @@ export async function engineInfo(botId: string): Promise<EngineInfo> {
     ...base,
     status: 'ready',
     version: typeof health.version === 'string' && health.version !== 'unknown' ? health.version : null,
-    model: b.model ?? data?.model ?? null,
-    provider: b.provider ?? data?.provider ?? null,
+    // SQLite fields are historical hints, never an authority over gateway configuration.
+    model: typeof data?.model === 'string' && data.model.trim() ? data.model : null,
+    provider: typeof data?.provider === 'string' && data.provider.trim() ? data.provider : null,
     providers: toProviders(data),
   };
 }

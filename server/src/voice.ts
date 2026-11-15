@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import OpenAI from 'openai';
 import { db, now } from './db.js';
 import { env } from './env.js';
+import { requireProvider } from './providers.js';
 import { newId } from './lib/ids.js';
 import type { AuthVars } from './lib/auth.js';
 import { appendRow, emitBot, getBotRow, getLive, listRoutines, listTasks, updateRow } from './store.js';
@@ -15,6 +16,10 @@ import type { ActivityKind, EventBody, MessageBody, RowBody, VoiceCallRecord, Vo
 import { listMemories } from './engine-memory.js';
 
 export const voiceApi = new Hono<AuthVars>();
+voiceApi.use('*', async (_c, next) => {
+  requireProvider('xai');
+  await next();
+});
 
 const XAI = 'https://api.x.ai/v1';
 const VOICE_MODEL = process.env.XAI_VOICE_MODEL ?? 'grok-voice-latest';
@@ -23,13 +28,6 @@ const SAMPLE_RATE = 24000;
 const xaiHeaders = () => ({ Authorization: `Bearer ${env.xaiKey}` });
 
 // ---------- voices / languages ----------
-
-const FALLBACK_VOICES: VoiceOption[] = [
-  ['altair', 'm'], ['ara', 'f'], ['atlas', 'm'], ['aurora', 'f'], ['carina', 'f'], ['castor', 'm'], ['celeste', 'f'], ['cosmo', 'm'],
-  ['eve', 'f'], ['helios', 'm'], ['helix', 'm'], ['iris', 'f'], ['kepler', 'm'], ['leo', 'm'], ['liora', 'f'], ['lumen', 'm'],
-  ['luna', 'f'], ['lux', 'm'], ['naksh', 'm'], ['orion', 'm'], ['perseus', 'm'], ['rex', 'm'], ['rigel', 'm'], ['sal', 'm'],
-  ['sirius', 'm'], ['ursa', 'f'], ['zagan', 'm'], ['zenith', 'm'],
-].map(([id, g]) => ({ id, name: id[0].toUpperCase() + id.slice(1), gender: g === 'f' ? 'female' : 'male' }));
 
 export const LANGUAGES: { code: string; name: string }[] = [
   { code: 'auto', name: 'Auto-detect' }, { code: 'en', name: 'English' }, { code: 'ar-EG', name: 'Arabic (Egypt)' },
@@ -41,21 +39,39 @@ export const LANGUAGES: { code: string; name: string }[] = [
 ];
 export const SPEEDS = [0.7, 0.85, 1, 1.15, 1.3, 1.5];
 
+class VoiceOptionsUnavailableError extends Error {
+  constructor() {
+    super('Voice options are unavailable from xAI. Check the provider connection and try again.');
+    this.name = 'VoiceOptionsUnavailableError';
+  }
+}
+
 let voiceCache: { at: number; voices: VoiceOption[] } | null = null;
 async function listVoices(): Promise<VoiceOption[]> {
+  requireProvider('xai');
   if (voiceCache && Date.now() - voiceCache.at < 3600_000) return voiceCache.voices;
   try {
-    const r = await fetch(`${XAI}/tts/voices`, { headers: xaiHeaders(), signal: AbortSignal.timeout(8000) });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const j = (await r.json()) as { voices?: { voice_id: string; name?: string; gender?: string }[] };
-    const voices = (j.voices ?? []).map((v) => ({ id: v.voice_id, name: v.name ?? v.voice_id, gender: v.gender }));
-    if (!voices.length) throw new Error('empty list');
+    const response = await fetch(`${XAI}/tts/voices`, { headers: xaiHeaders(), signal: AbortSignal.timeout(8000) });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new VoiceOptionsUnavailableError();
+    }
+    const data = await response.json() as { voices?: { voice_id?: unknown; name?: unknown; gender?: unknown }[] };
+    if (!Array.isArray(data.voices) || !data.voices.length) throw new VoiceOptionsUnavailableError();
+    const voices: VoiceOption[] = data.voices.map((voice) => {
+      if (!voice || typeof voice.voice_id !== 'string' || !voice.voice_id.trim()) throw new VoiceOptionsUnavailableError();
+      return {
+        id: voice.voice_id,
+        name: typeof voice.name === 'string' && voice.name.trim() ? voice.name : voice.voice_id,
+        ...(typeof voice.gender === 'string' ? { gender: voice.gender } : {}),
+      };
+    });
     voiceCache = { at: Date.now(), voices };
-  } catch (e: any) {
-    console.warn('[voice] voice list unavailable, using static list:', e?.message);
-    voiceCache = { at: Date.now() - 3000_000, voices: FALLBACK_VOICES }; // retry in ~10 min
+    return voices;
+  } catch {
+    // Never invent a catalog or expose provider response bodies/credentials on failure.
+    throw new VoiceOptionsUnavailableError();
   }
-  return voiceCache.voices;
 }
 
 const clampSpeed = (s: unknown) => {
@@ -235,7 +251,14 @@ const fmtDuration = (ms: number) => {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
 };
 
-voiceApi.get('/options', async (c) => c.json({ voices: await listVoices(), languages: LANGUAGES, speeds: SPEEDS }));
+voiceApi.get('/options', async (c) => {
+  try {
+    return c.json({ voices: await listVoices(), languages: LANGUAGES, speeds: SPEEDS });
+  } catch (error) {
+    if (!(error instanceof VoiceOptionsUnavailableError)) throw error;
+    return c.json({ error: error.message, code: 'provider_options_unavailable', provider: 'xai', retryable: true }, 502);
+  }
+});
 
 voiceApi.post('/session', async (c) => {
   const user = c.get('user');
@@ -357,12 +380,16 @@ voiceApi.post('/tool', async (c) => {
   }
 });
 
-const xai = new OpenAI({ apiKey: env.xaiKey, baseURL: XAI, timeout: 45_000 });
+let xai: OpenAI | undefined;
+function xaiClient() {
+  requireProvider('xai');
+  return xai ??= new OpenAI({ apiKey: env.xaiKey, baseURL: XAI, timeout: 45_000 });
+}
 
 async function summarizeCall(botName: string, transcript: { role: string; text: string }[], tasks: string[]): Promise<string | null> {
   if (!transcript.length && !tasks.length) return null;
   const lines = transcript.map((t) => `${t.role === 'user' ? 'User' : botName}: ${t.text}`).join('\n').slice(-12_000);
-  const res: any = await xai.responses.create({
+  const res: any = await xaiClient().responses.create({
     model: env.xaiModel,
     reasoning: { effort: 'low' },
     store: false,

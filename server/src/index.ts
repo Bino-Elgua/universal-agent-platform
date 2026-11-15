@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Server } from 'node:http';
 import { env } from './env.js';
+import { providerConfiguration, ProviderUnavailableError } from './providers.js';
 import { api } from './routes.js';
 import { attachVncRelay } from './vnc.js';
 import { initRoutines } from './routines.js';
@@ -28,7 +29,14 @@ initRooms();
 expireStaleApprovals();
 
 const app = new Hono();
-app.get('/api/health', (c) => c.json({ ok: true, engine: 'hermes' }));
+app.onError((error, c) => {
+  if (error instanceof ProviderUnavailableError) {
+    return c.json({ error: error.message, code: 'provider_unavailable', provider: error.provider, setting: error.setting }, 503);
+  }
+  console.error('[server] request failed', error);
+  return c.json({ error: 'Internal server error' }, 500);
+});
+app.get('/api/health', (c) => c.json({ ok: true, engine: 'hermes', providers: providerConfiguration() }));
 // The app's tools for the agent engines (MCP).
 app.route('/mcp', mcpApi);
 app.route('/api/checkins', checkinsApi);
@@ -43,13 +51,14 @@ if (fs.existsSync(webDist)) {
   app.get('*', (c) => c.html(fs.readFileSync(path.join(webDist, 'index.html'), 'utf8')));
 }
 
-const server = serve({ fetch: app.fetch, port: env.port }, (info) => console.log(`[grokbot] server on http://localhost:${info.port}`));
+const server = serve({ fetch: app.fetch, port: env.port }, (info) => console.log(`[uap] server on http://localhost:${info.port}`));
 attachVncRelay(server as unknown as Server);
-// GROKBOT_NO_SCHEDULER=1 for extra dev/test servers sharing a database copy, so routines and triggers don't fire twice.
-if (process.env.GROKBOT_NO_SCHEDULER !== '1') {
+// Disable background schedulers for extra dev/test servers sharing a database copy.
+// Keep the upstream alias compatible with existing self-hosted installations.
+if (process.env.UAP_NO_SCHEDULER !== '1' && process.env.GROKBOT_NO_SCHEDULER !== '1') {
   initRoutines(enqueue);
   void initTriggers(enqueue);
-initProactive(enqueue);
-} else console.log('[grokbot] scheduler disabled (GROKBOT_NO_SCHEDULER=1)');
+  initProactive(enqueue);
+} else console.log('[uap] scheduler disabled (UAP_NO_SCHEDULER or legacy alias)');
 startIdleWatcher();
 initEngines();

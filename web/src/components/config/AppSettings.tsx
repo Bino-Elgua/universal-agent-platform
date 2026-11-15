@@ -1,3 +1,4 @@
+import { isProviderConfigured, providerRecovery } from '../../lib/providers';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Toolkit } from '@shared/types';
@@ -107,7 +108,7 @@ function ComputerSection() {
   const computer = useStore((s) => s.computer);
   const bots = useStore((s) => s.bots);
   const [details, setDetails] = useState<ComputerDetails | null>(null);
-  const [busy, setBusy] = useState<'wake' | 'sleep' | null>(null);
+  const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const load = useCallback(() => { configApi.computerDetails().then(setDetails).catch(() => {}); }, []);
   useEffect(() => { load(); }, [load, computer?.status, computer?.screens.length]);
@@ -115,11 +116,11 @@ function ComputerSection() {
   const status = computer?.status ?? details?.computer.status;
   const running = status === 'running';
   const transitioning = status === 'starting' || status === 'resuming' || status === 'creating' || status === 'suspending';
-  const act = async (kind: 'wake' | 'sleep') => {
-    setBusy(kind); setNote(null);
-    try { kind === 'wake' ? await configApi.wake() : await configApi.sleep(); }
+  const wake = async () => {
+    setBusy(true); setNote(null);
+    try { await configApi.wake(); }
     catch (e) { setNote((e as Error).message); }
-    finally { setBusy(null); }
+    finally { setBusy(false); }
   };
   const byId = new Map(bots.map((b) => [b.id, b]));
   // The server says how many screens the computer can hold; 4 until it does.
@@ -135,13 +136,11 @@ function ComputerSection() {
             <div className="cfg-row__text">
               <div className="cfg-row__title">Bots’ computer · {computerStatusText(computer ?? null)}</div>
               <div className="cfg-row__sub">
-                {details ? `Goes to sleep after ${details.hibernation.idleMinutes} idle minutes when nobody is watching. Starts again on its own once a Bot has work.` : 'Checking…'}
+                Your operator manages suspension for this shared computer.
               </div>
             </div>
-            {running || status === 'suspending' ? (
-              <button type="button" className="cfg-btn cfg-btn--secondary" disabled={!running || !!busy} onClick={() => act('sleep')}>{busy === 'sleep' || status === 'suspending' ? 'Going to sleep…' : 'Sleep'}</button>
-            ) : (
-              <button type="button" className="cfg-btn cfg-btn--primary" disabled={transitioning || !!busy} onClick={() => act('wake')}>{busy === 'wake' || transitioning ? 'Waking…' : 'Wake'}</button>
+            {!running && status !== 'suspending' && (
+              <button type="button" className="cfg-btn cfg-btn--primary" disabled={transitioning || busy} onClick={wake}>{busy || transitioning ? 'Waking…' : 'Wake'}</button>
             )}
           </div>
           {computer?.error && status === 'error' && <div className="cfg-error cfg-error--inset">{computer.error}</div>}
@@ -223,9 +222,15 @@ function PermissionsSection() {
 // ---------------------------------------------------------------------------
 
 function AppsSection() {
+  const configured = useStore((s) => isProviderConfigured(s.providers, 'composio'));
   const version = useStore((s) => s.connectionsVersion);
   const [apps, setApps] = useState<Toolkit[] | null>(null);
-  useEffect(() => { configApi.connectedApps().then((r) => setApps(r.connectedApps ?? [])).catch(() => setApps([])); }, [version]);
+  useEffect(() => {
+    if (!configured) { setApps(null); return; }
+    let alive = true;
+    configApi.connectedApps().then((r) => { if (alive) setApps(r.connectedApps ?? []); }).catch(() => { if (alive) setApps(null); });
+    return () => { alive = false; };
+  }, [version, configured]);
   const openApps = () => { useConfigUI.getState().closeAppSettings(); useStore.getState().setModal('apps'); };
   return (
     <>
@@ -234,10 +239,10 @@ function AppsSection() {
         <div className="cfg-card">
           <div className="cfg-row">
             <div className="cfg-row__text">
-              <div className="cfg-row__title">{apps === null ? 'Checking…' : apps.length ? `${apps.length} app${apps.length === 1 ? '' : 's'} connected` : 'No apps connected yet'}</div>
-              <div className="cfg-row__sub">Bots ask before doing anything that changes data in an app.</div>
+              <div className="cfg-row__title">{!configured ? 'App connections unavailable' : apps === null ? 'Connection status unavailable' : apps.length ? `${apps.length} app${apps.length === 1 ? '' : 's'} connected` : 'No apps connected yet'}</div>
+              <div className="cfg-row__sub">{configured ? 'Bots ask before doing anything that changes data in an app.' : providerRecovery.composio}</div>
             </div>
-            <button type="button" className="cfg-btn cfg-btn--primary" onClick={openApps}>{apps?.length ? 'Manage apps' : 'Connect apps'}</button>
+            <button type="button" className="cfg-btn cfg-btn--primary" disabled={!configured} title={!configured ? providerRecovery.composio : undefined} onClick={openApps}>{apps?.length ? 'Manage apps' : 'Connect apps'}</button>
           </div>
           {apps?.map((a) => (
             <div key={a.slug} className="cfg-row">

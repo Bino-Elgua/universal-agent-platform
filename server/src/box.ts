@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { env } from './env.js';
 import { orgo } from './orgo.js';
+import { requireOrgoComputer } from './providers.js';
 
 /**
  * The box: the one Orgo computer every bot works on. When this server runs on that computer
@@ -44,9 +45,9 @@ export const box = {
   /** Run a bash command on the box. `screenId` picks which screen's DISPLAY it sees. */
   async bash(command: string, timeoutSec = 60, screenId?: string | null): Promise<BashResult> {
     if (env.localBox) return localBash(command, timeoutSec, screenId);
-    if (!env.orgoComputerId) throw new Error('ORGO_COMPUTER_ID is not set');
+    const computerId = requireOrgoComputer();
     const cmd = `export DISPLAY=${displayFor(screenId)}; ${command}`;
-    const r = await orgo.bash(env.orgoComputerId, screenId ?? undefined, cmd, timeoutSec);
+    const r = await orgo.bash(computerId, screenId ?? undefined, cmd, timeoutSec);
     return { output: r.output ?? '', exit_code: r.exit_code ?? (r.success ? 0 : 1) };
   },
 

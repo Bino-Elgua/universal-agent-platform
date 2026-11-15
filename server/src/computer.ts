@@ -1,5 +1,6 @@
 import { db, now } from './db.js';
 import { env } from './env.js';
+import { requireOrgoComputer, ProviderUnavailableError } from './providers.js';
 import { hub } from './lib/hub.js';
 import { orgo, OrgoError, type OrgoScreen } from './orgo.js';
 import { cdpPortFor, dressScreen, resetScreen, undressScreen, type DeskBot } from './desk.js';
@@ -19,8 +20,7 @@ export const MAX_SCREENS = 4;
 export interface BotScreen { computerId: string; screenId: string; width?: number; height?: number }
 
 function computerId(): string {
-  if (!env.orgoComputerId) throw new Error('ORGO_COMPUTER_ID is not set, so there is no computer for the bots to use.');
-  return env.orgoComputerId;
+  return requireOrgoComputer();
 }
 
 function rowFor(userId: string) {
@@ -251,22 +251,24 @@ export async function forgetBotFiles(botId: string): Promise<void> {
   await box.bash(`rm -rf -- /root/grokbot/profiles/${botId} /root/grokbot/files/${botId}`, 60);
 }
 
-/** The shared computer is never suspended from the app (other things live on it). */
-export async function suspendComputer(_userId: string, _reason = 'manual'): Promise<void> {}
-
 /** Refresh status and screen sizes from Orgo (cheap; used when the UI opens). */
 export async function refreshComputer(userId: string): Promise<ComputerState> {
-  if (!env.orgoComputerId) {
-    setStatus(userId, 'error', 'ORGO_COMPUTER_ID is not set.');
+  let id: string;
+  try {
+    id = requireOrgoComputer();
+  } catch (error) {
+    if (!(error instanceof ProviderUnavailableError)) throw error;
+    // Reading status remains useful while disabled; execution requests throw the typed error.
+    setStatus(userId, 'error', error.message);
     return computerState(userId);
   }
   try {
-    const c = await orgo.getComputer(env.orgoComputerId);
+    const c = await orgo.getComputer(id);
     const s = mapStatus(c.asleep ? 'suspended' : c.status);
     const r = rowFor(userId);
     if (s !== r.status || r.error) setStatus(userId, s);
     if (s === 'running') {
-      const screens = await orgo.listScreens(env.orgoComputerId);
+      const screens = await orgo.listScreens(id);
       const byId = new Map(screens.map((x) => [x.default ? 'default' : x.id, x]));
       for (const row of db.prepare('SELECT bot_id, screen_id FROM screens WHERE user_id=?').all(userId) as any[]) saveSize(row.bot_id, byId.get(row.screen_id));
     }

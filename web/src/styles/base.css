@@ -120,3 +120,13 @@ a { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* Original activity badges. Status is also conveyed by text beside each avatar. */
+.bot-avatar[data-state='working'], .bot-avatar[data-state='thinking'] { animation: badge-work 2s ease-in-out infinite; }
+.bot-avatar[data-state='listening'] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 25%, transparent); border-radius: 50%; }
+.bot-avatar[data-state='speaking'] { animation: badge-speak 700ms ease-in-out infinite; }
+.bot-avatar[data-state='success'] .bot-avatar__nodes, .bot-avatar[data-state='error'] .bot-avatar__nodes { opacity: 0.15; }
+.bot-avatar[data-state='sleep'] { opacity: 0.45; }
+@keyframes badge-work { 50% { transform: translateY(-2px); } }
+@keyframes badge-speak { 50% { transform: scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { .bot-avatar { animation: none !important; } }

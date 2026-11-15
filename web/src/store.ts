@@ -1,3 +1,5 @@
+import type { ProviderConfiguration } from './lib/providers';
+import { readPreference } from './lib/preferences';
 import { create } from 'zustand';
 import type { Bot, ComputerState, LiveState, Routine, Row, ServerEvent, User } from '@shared/types';
 import { api } from './lib/api';
@@ -9,6 +11,8 @@ interface Transcript { generation: number; bySeq: Record<number, Row>; loaded: b
 interface State {
   user: User | null;
   devLogin: boolean;
+  googleLogin: boolean;
+  providers: ProviderConfiguration | null;
   authChecked: boolean;
 
   bots: Bot[];
@@ -42,15 +46,17 @@ interface State {
   set(p: Partial<State>): void;
 }
 
-const LS_SELECTED = 'grokbot.selectedBot';
-const LS_DETAILS = 'grokbot.detailsOpen';
-const LS_SIDEBAR = 'grokbot.sidebarCollapsed';
-const lsGet = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+const LS_SELECTED = 'uap.selectedBot';
+const LS_DETAILS = 'uap.detailsOpen';
+const LS_SIDEBAR = 'uap.sidebarCollapsed';
+const lsGet = readPreference;
 const lsSet = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
 
 export const useStore = create<State>((set, get) => ({
   user: null,
   devLogin: false,
+  googleLogin: false,
+  providers: null,
   authChecked: false,
   bots: [],
   live: {},
@@ -69,8 +75,8 @@ export const useStore = create<State>((set, get) => ({
 
   async checkAuth() {
     try {
-      const { user, devLogin } = await api.me();
-      set({ user, devLogin, authChecked: true });
+      const { user, devLogin, googleLogin, providers } = await api.me();
+      set({ user, devLogin, googleLogin, providers, authChecked: true });
     } catch {
       set({ user: null, authChecked: true });
     }
@@ -171,7 +177,7 @@ export const useStore = create<State>((set, get) => ({
       case 'tasks':
       case 'memories':
         // Picked up by configStore.ts (Tasks view, Library/Tasks tabs, bot settings).
-        window.dispatchEvent(new CustomEvent('grokbot:event', { detail: ev }));
+        window.dispatchEvent(new CustomEvent('uap:event', { detail: ev }));
         return;
       case 'connections':
         set((st) => ({ connectionsVersion: st.connectionsVersion + 1 }));

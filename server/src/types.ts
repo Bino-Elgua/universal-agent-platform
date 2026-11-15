@@ -198,6 +198,9 @@ export interface EngineProvider {
 /** The Hermes agent that runs one bot. */
 export interface EngineInfo {
   botId: string;
+  kind: 'primary' | 'managed' | null;
+  /** This gateway does not expose an authorized global model configuration setter. */
+  configurationMode: 'in_hermes';
   /** Hermes profile name ('default' for the primary bot). */
   profile: string;
   status: 'ready' | 'starting' | 'stopped' | 'error';

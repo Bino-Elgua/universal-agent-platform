@@ -1,7 +1,7 @@
-/* Design tokens: light theme. */
+/* Universal Agent Platform: slate surfaces and deep teal accent. */
 :root {
-  --color-bg-chrome: #FCFCFC;
-  --color-bg-sidebar: #F5F5F5;
+  --color-bg-chrome: #F6F9FA;
+  --color-bg-sidebar: #EAF0F2;
   --color-bg-pane: #FFFFFF;
   --color-bg-active: #1C1C1C14;
   --color-bg-tertiary: #1C1C1C0F;
@@ -13,7 +13,7 @@
   --color-icon-secondary: #1C1C1CA8;
   --color-border-secondary: #1C1C1C1F;
   --color-border-tertiary: #1C1C1C14;
-  --color-primary: #1C1C1C;
+  --color-primary: #176C78;
   --color-bot-pink: #F93498;
   --color-bot-pink-bubble: #C82779;
   --color-bot-pink-action: #E52F8B;
@@ -36,9 +36,9 @@
   --font-weight-semibold: 600;
   --radius-sm: 8px;
   --radius-md: 12px;
-  --radius-bubble: 18px;
-  --radius-composer: 22px;
-  --radius-card: 24px;
+  --radius-bubble: 14px;
+  --radius-composer: 18px;
+  --radius-card: 16px;
   --radius-full: 9999px;
 
   /* --- font stacks and interaction states --- */
@@ -47,9 +47,9 @@
   --color-bg-hover: #1C1C1C0F;
   --color-bg-secondary-hover: #1C1C1C1A;
   --color-bg-secondary-active: #1C1C1C2E;
-  --color-bg-primary-hover: #363636;
+  --color-bg-primary-hover: #125560;
   --color-bg-elevated-hover: #F1F1F1;
-  --color-border-focus: #1E86FC;
+  --color-border-focus: #176C78;
   --color-bg-scrim-heavy: #000000E5;
   --color-ink: #000000;
   --color-success: #10AB61;
@@ -84,9 +84,9 @@
 
 /* ---------- dark theme. Flat: no shadows. ---------- */
 :root[data-theme='dark'] {
-  --color-bg-chrome: #121212;
-  --color-bg-sidebar: #0E0E0E;
-  --color-bg-pane: #161616;
+  --color-bg-chrome: #111C23;
+  --color-bg-sidebar: #0D171D;
+  --color-bg-pane: #15232C;
   --color-bg-active: #F5F5F514;
   --color-bg-tertiary: #F5F5F50A;
   --color-bg-scrim: #000000B2;
@@ -97,13 +97,13 @@
   --color-icon-secondary: #F5F5F5A3;
   --color-border-secondary: #F5F5F51A;
   --color-border-tertiary: #F5F5F50F;
-  --color-primary: #F5F5F5;
+  --color-primary: #9ED9DE;
   --color-bg-hover: #F5F5F50F;
   --color-bg-secondary-hover: #F5F5F514;
   --color-bg-secondary-active: #F5F5F533;
-  --color-bg-primary-hover: #DBDBDB;
+  --color-bg-primary-hover: #BFE9EC;
   --color-bg-elevated-hover: #2C2C2C;
-  --color-border-focus: #1884FC;
+  --color-border-focus: #9ED9DE;
   --color-bg-scrim-heavy: #000000F2;
   --color-ink: #F5F5F5;
   --color-success: #0E9F5A;

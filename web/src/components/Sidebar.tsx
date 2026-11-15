@@ -33,7 +33,7 @@ const BotRow = memo(function BotRow({ bot, selected, running, awaiting, onSelect
   return (
     <button type="button" className={`bot-row${selected ? ' is-selected' : ''}`} onClick={() => onSelect(bot.id)} aria-current={selected || undefined}>
       <span className="bot-row__avatar">
-        <BotAvatarFor bot={bot} size={36} />
+        <BotAvatarFor bot={bot} size={36} state={running ? 'working' : 'idle'} />
         {(running || awaiting || bot.unread > 0) && (
           <span className={`status-dot ${awaiting ? 'is-attention' : running ? 'is-working' : 'is-unread'}`} aria-label={awaiting ? 'Needs attention' : running ? 'Working' : 'Unread activity'} />
         )}
@@ -92,7 +92,7 @@ export function Sidebar() {
           <div className="pinned">
             <button type="button" className={`pinned__tile${selectedBotId === primary.id ? ' is-selected' : ''}`} onClick={() => selectBot(primary.id)} title={displayName(primary)}>
               <span className="pinned__avatar">
-                <BotAvatarFor bot={primary} size={collapsed ? 44 : 60} star />
+                <BotAvatarFor bot={primary} size={collapsed ? 44 : 60} state={live[primary.id]?.isRunning ? 'working' : 'idle'} star />
                 {live[primary.id]?.isRunning && <span className="status-dot is-working pinned__dot" />}
               </span>
               {!collapsed && <span className="pinned__label">{displayName(primary)}</span>}

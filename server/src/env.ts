@@ -9,12 +9,25 @@ function req(name: string): string {
 }
 
 /** A secret from NAME, or from the file named by NAME_FILE (so keys need not sit in .env). */
-function secret(name: string): string {
-  const direct = process.env[name];
+function secret(name: string, required = true): string {
+  const direct = process.env[name]?.trim();
   if (direct) return direct;
   const file = process.env[`${name}_FILE`];
-  if (file) return fs.readFileSync(file, 'utf8').trim();
-  throw new Error(`Missing env ${name} (or ${name}_FILE)`);
+  if (file) {
+    const value = fs.readFileSync(file, 'utf8').trim();
+    if (!value) throw new Error(`Empty secret file for ${name}`);
+    return value;
+  }
+  if (required) throw new Error(`Missing env ${name} (or ${name}_FILE)`);
+  return '';
+}
+
+export function defaultDatabasePath(dataDir = new URL('../../data/', import.meta.url).pathname): string {
+  // Preserve existing local data when upgrading from the upstream package name.
+  const legacy = path.join(dataDir, 'grokbot.db');
+  const current = path.join(dataDir, 'platform.db');
+  if (fs.existsSync(legacy) && fs.existsSync(current)) throw new Error('Both platform.db and grokbot.db exist. Set DB_PATH explicitly to select the intended database.');
+  return fs.existsSync(legacy) ? legacy : current;
 }
 
 const hermesHome = process.env.HERMES_HOME_PRIMARY ?? path.join(os.homedir(), '.hermes');
@@ -24,13 +37,13 @@ export const env = {
   appUrl: process.env.APP_URL ?? 'http://localhost:5173',
   /** Public URL of this server, used for OAuth callbacks. */
   serverUrl: process.env.SERVER_URL ?? `http://localhost:${process.env.PORT ?? 8787}`,
-  xaiKey: req('XAI_API_KEY'),
+  xaiKey: secret('XAI_API_KEY', false),
   xaiModel: process.env.XAI_MODEL ?? 'grok-4.7',
-  composioKey: req('COMPOSIO_API_KEY'),
-  orgoKey: secret('ORGO_API_KEY'),
+  composioKey: secret('COMPOSIO_API_KEY', false),
+  orgoKey: secret('ORGO_API_KEY', false),
   sessionSecret: req('SESSION_SECRET'),
   devLogin: process.env.DEV_LOGIN === '1',
-  dbPath: process.env.DB_PATH ?? new URL('../../data/grokbot.db', import.meta.url).pathname,
+  dbPath: process.env.DB_PATH ?? defaultDatabasePath(),
 
   // ---- Hermes engine ----
   /** The `hermes` CLI used to start a gateway for each extra bot. */
@@ -39,7 +52,9 @@ export const env = {
   hermesHome,
   hermesUrl: (process.env.HERMES_URL ?? 'http://127.0.0.1:8642').replace(/\/+$/, ''),
   hermesKey: process.env.HERMES_KEY ?? '',
-  /** Where each extra bot's own Hermes home lives. Must be outside ~/.hermes so it is a separate tenant. */
+  /** Explicit operator grant to copy primary model config/auth/keys into managed homes. */
+  inheritPrimaryCredentials: process.env.HERMES_INHERIT_PRIMARY_CREDENTIALS === '1',
+  /** Where each extra bot's own Hermes home lives. Must be outside the primary home; separate homes still share the host OS identity. */
   enginesDir: process.env.ENGINES_DIR ?? new URL('../../data/engines', import.meta.url).pathname,
   enginePortBase: Number(process.env.ENGINE_PORT_BASE ?? 8650),
   /** URL the Hermes gateways use to reach this server's MCP endpoint. */

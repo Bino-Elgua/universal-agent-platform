@@ -1,4 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#16a34a"/>
-  <text x="32" y="32" dy="0.35em" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="26" font-weight="600" fill="#ffffff">GD</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="2" y="2" width="44" height="44" rx="12" fill="#176C78"/><g fill="none" stroke="white" stroke-width="2.5"><path d="M24 24 13 15m11 9 11-9M24 24v13"/><circle cx="13" cy="15" r="3" fill="#176C78"/><circle cx="35" cy="15" r="3" fill="#176C78"/><circle cx="24" cy="37" r="3" fill="#176C78"/><circle cx="24" cy="24" r="4" fill="white"/></g></svg>

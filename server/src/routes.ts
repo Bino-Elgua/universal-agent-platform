@@ -3,12 +3,14 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { db, now } from './db.js';
 import { env } from './env.js';
+import { deployment, DeploymentOwnershipError } from './deployment.js';
+import { providerConfiguration } from './providers.js';
 import { newId } from './lib/ids.js';
 import { hub } from './lib/hub.js';
 import { createSession, destroySession, isOwnerKey, requireUser, userFromCookieHeader, type AuthVars } from './lib/auth.js';
 import { allLive, appendRow, clearConversation, emitBot, getBot, getBotRow, getRow, listBots, listRoutines, listRows, listTasks, toRoutine, updateRow } from './store.js';
 import { enqueue, interrupt, resolveApproval } from './agent/loop.js';
-import { computerState, ensureComputer, forgetBotFiles, readyScreen, refreshComputer, releaseScreen, suspendComputer } from './computer.js';
+import { computerState, ensureComputer, forgetBotFiles, readyScreen, refreshComputer, releaseScreen } from './computer.js';
 import { assignEngine, provisionEngine, removeEngine, syncPersona } from './engine.js';
 import { deleteMemory, listMemories, memoryBot } from './engine-memory.js';
 import { orgo } from './orgo.js';
@@ -35,8 +37,11 @@ class UserError extends Error {}
 
 const agentCount = () => (db.prepare("SELECT COUNT(*) n FROM bots WHERE COALESCE(kind,'agent')<>'room' AND COALESCE(hidden,0)=0").get() as any).n as number;
 
-function createBot(userId: string, b: { name: string; label?: string; description?: string; instructions?: string; avatarShape?: string; avatarColor?: string; mode?: string; isPrimary?: boolean }) {
-  // Every bot needs a screen of its own on the one shared computer.
+type BotInput = { name: string; label?: string; description?: string; instructions?: string; avatarShape?: string; avatarColor?: string; mode?: string; isPrimary?: boolean };
+
+/** SQL-only creation: caller owns the transaction and publishes after commit. */
+function insertBot(userId: string, b: BotInput) {
+  deployment.requireOwner(userId);
   if (agentCount() >= env.maxBots) throw new UserError(`The team is full: the computer has room for ${env.maxBots} bots. Remove one to add another.`);
   const id = newId('bot');
   const shape = SHAPES.includes(b.avatarShape as AvatarShape) ? b.avatarShape : hashPick(id, SHAPES.slice(0, 13));
@@ -44,27 +49,46 @@ function createBot(userId: string, b: { name: string; label?: string; descriptio
   db.prepare(
     'INSERT INTO bots(id,user_id,name,label,description,instructions,avatar_shape,avatar_color,mode,is_primary,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
   ).run(id, userId, b.name.trim().slice(0, 60) || 'New Bot', b.label ?? '', b.description ?? '', b.instructions ?? '', shape, color, b.mode === 'teammate' ? 'teammate' : 'personal', b.isPrimary ? 1 : 0, now(), now());
-  // The first bot is the agent that already runs on the computer; the others get an engine of their own.
-  if (assignEngine(id) === 'managed') provisionEngine(id);
-  hub.emit(userId, { type: 'roster' });
+  assignEngine(id);
   return getBot(id)!;
 }
 
-function findOrCreateUser(email: string, name?: string, preferId?: string) {
-  const existing = db.prepare('SELECT * FROM users WHERE lower(email)=lower(?)').get(email) as any;
-  if (existing) return { id: existing.id as string, isNew: false };
-  if (env.allowedEmails.length && !env.allowedEmails.includes(email.toLowerCase())) throw new UserError('This account is not allowed to sign in here.');
-  const id = preferId ?? newId('usr');
-  db.prepare('INSERT INTO users(id,email,name,created_at) VALUES (?,?,?,?)').run(id, email, name ?? email.split('@')[0], now());
-  createBot(id, { name: env.primaryBotName, label: env.primaryBotLabel, description: 'Your main point of contact. Checks in proactively and coordinates work with your other Bots.', avatarShape: 'blob', avatarColor: 'black', isPrimary: true });
-  return { id, isNew: true };
+function createBot(userId: string, b: BotInput) {
+  const bot = db.transaction(() => insertBot(userId, b)).immediate();
+  provisionEngine(bot.id);
+  hub.emit(userId, { type: 'roster' });
+  return bot;
+}
+
+function findOrCreateUser(email: string, name?: string, preferId?: string, setupAuthority = false) {
+  email = email.trim().toLowerCase();
+  const result = db.transaction(() => {
+    const existing = db.prepare('SELECT * FROM users WHERE lower(email)=lower(?)').get(email) as any;
+    if (existing) {
+      deployment.requireOwner(existing.id);
+      return { id: existing.id as string, isNew: false };
+    }
+    if (deployment.ownerId()) throw new DeploymentOwnershipError();
+    // Public OAuth is not installation setup authority. A single configured email
+    // may enroll through OAuth; otherwise use the secret-authenticated owner login.
+    const allowedOwner = env.allowedEmails.length === 1 && env.allowedEmails[0] === email;
+    if (!setupAuthority && !allowedOwner) throw new DeploymentOwnershipError('Set one ALLOWED_EMAILS owner address or use the owner sign-in command to initialize this self-hosted installation.');
+    if (env.allowedEmails.length && !env.allowedEmails.includes(email)) throw new UserError('This account is not allowed to sign in here.');
+    const id = preferId ?? newId('usr');
+    db.prepare('INSERT INTO users(id,email,name,created_at) VALUES (?,?,?,?)').run(id, email, name ?? email.split('@')[0], now());
+    deployment.claimOwner(id);
+    insertBot(id, { name: env.primaryBotName, label: env.primaryBotLabel, description: 'Your main point of contact. Checks in proactively and coordinates work with your other Bots.', avatarShape: 'blob', avatarColor: 'black', isPrimary: true });
+    return { id, isNew: true };
+  }).immediate();
+  if (result.isNew) hub.emit(result.id, { type: 'roster' });
+  return result;
 }
 
 // ---------- auth ----------
 
 api.get('/auth/me', (c) => {
   const user = userFromCookieHeader(c.req.header('cookie'));
-  return c.json({ user, devLogin: env.devLogin });
+  return c.json({ user, devLogin: env.devLogin, googleLogin: Boolean(env.composioKey), providers: providerConfiguration() });
 });
 
 api.get('/auth/google/start', async (c) => {
@@ -72,16 +96,20 @@ api.get('/auth/google/start', async (c) => {
   const provisional = newId('usr');
   const cb = `${env.serverUrl}/api/auth/google/callback?attempt=${attemptId}`;
   const { redirectUrl, connectedAccountId } = await startGoogleLogin(provisional, cb);
-  db.prepare('INSERT INTO login_attempts(id,provisional_user_id,connected_account_id,created_at) VALUES (?,?,?,?)').run(attemptId, provisional, connectedAccountId ?? null, now());
+  if (!connectedAccountId) return c.json({ error: 'Google sign-in did not issue a bound connection. Try again.' }, 502);
+  db.prepare('INSERT INTO login_attempts(id,provisional_user_id,connected_account_id,created_at) VALUES (?,?,?,?)').run(attemptId, provisional, connectedAccountId, now());
   return c.redirect(redirectUrl);
 });
 
 api.get('/auth/google/callback', async (c) => {
   const attempt = db.prepare('SELECT * FROM login_attempts WHERE id=?').get(c.req.query('attempt') ?? '') as any;
-  const caId = c.req.query('connected_account_id') ?? attempt?.connected_account_id;
-  if (!attempt || c.req.query('status') === 'failed' || !caId) return c.redirect(`${env.appUrl}/?login=failed`);
-  if (attempt.connected_account_id && caId !== attempt.connected_account_id) return c.redirect(`${env.appUrl}/?login=failed`);
+  const caId = attempt?.connected_account_id;
+  if (!attempt || !caId || (c.req.query('connected_account_id') && c.req.query('connected_account_id') !== caId)) return c.redirect(`${env.appUrl}/?login=failed`);
   db.prepare('DELETE FROM login_attempts WHERE id=?').run(attempt.id);
+  if (c.req.query('status') === 'failed' || attempt.created_at < now() - 15 * 60_000) {
+    await deleteConnection(caId).catch(() => console.warn('[auth] provisional connection cleanup failed; operator review required'));
+    return c.redirect(`${env.appUrl}/?login=failed`);
+  }
   try {
     const profile = await googleProfile(caId);
     const { id, isNew } = findOrCreateUser(profile.email, profile.name, attempt.provisional_user_id);
@@ -90,7 +118,8 @@ api.get('/auth/google/callback', async (c) => {
     createSession(c, id);
     return c.redirect(`${env.appUrl}/`);
   } catch (e: any) {
-    console.error('[auth] google callback', e);
+    await deleteConnection(caId).catch(() => console.warn('[auth] provisional connection cleanup failed; operator review required'));
+    console.warn('[auth] Google sign-in failed');
     return c.redirect(`${env.appUrl}/?login=failed`);
   }
 });
@@ -100,11 +129,11 @@ api.post('/auth/dev', async (c) => {
   const { email, name } = await c.req.json<{ email: string; name?: string }>();
   if (!email?.includes('@')) return c.json({ error: 'email required' }, 400);
   try {
-    const { id } = findOrCreateUser(email, name);
+    const { id } = findOrCreateUser(email, name, undefined, true);
     createSession(c, id);
     return c.json({ ok: true });
   } catch (e: any) {
-    return c.json({ error: e instanceof UserError ? e.message : 'could not sign in' }, 403);
+    return c.json({ error: (e instanceof UserError || e instanceof DeploymentOwnershipError) ? e.message : 'could not sign in' }, 403);
   }
 });
 
@@ -118,7 +147,7 @@ api.post('/auth/owner', async (c) => {
   const { email, name, link } = await c.req.json<{ email: string; name?: string; link?: boolean }>();
   if (!email?.includes('@')) return c.json({ error: 'email required' }, 400);
   try {
-    const { id } = findOrCreateUser(email, name);
+    const { id } = findOrCreateUser(email, name, undefined, true);
     if (link) {
       const token = crypto.randomBytes(24).toString('base64url');
       signInLinks.set(token, { userId: id, expires: Date.now() + 15 * 60_000 });
@@ -127,7 +156,7 @@ api.post('/auth/owner', async (c) => {
     createSession(c, id);
     return c.json({ ok: true });
   } catch (e: any) {
-    return c.json({ error: e instanceof UserError ? e.message : 'could not sign in' }, 403);
+    return c.json({ error: (e instanceof UserError || e instanceof DeploymentOwnershipError) ? e.message : 'could not sign in' }, 403);
   }
 });
 
@@ -218,9 +247,10 @@ api.delete('/bots/:id', async (c) => {
     await deleteEventTrigger(r.id).catch(() => {});
   }
   if (b.kind !== 'room') {
-    await removeEngine(b.id).catch((e) => console.warn('[engine] remove failed', e?.message ?? e));
-    await releaseScreen(b.id).catch((e) => console.warn('[computer] release failed', e?.message ?? e));
-    await forgetBotFiles(b.id).catch((e) => console.warn('[computer] cleanup failed', e?.message ?? e));
+    // Retain the profile if cleanup cannot be verified; retry must still know its resources.
+    await removeEngine(b.id);
+    await releaseScreen(b.id);
+    await forgetBotFiles(b.id);
   }
   db.prepare('DELETE FROM screens WHERE bot_id=?').run(b.id);
   db.prepare('DELETE FROM bots WHERE id=?').run(b.id);
@@ -380,10 +410,7 @@ api.post('/computer/ensure', (c) => {
   return c.json({ computer: computerState(userId) });
 });
 
-api.post('/computer/suspend', async (c) => {
-  await suspendComputer(c.get('user').id);
-  return c.json({ computer: computerState(c.get('user').id) });
-});
+api.post('/computer/suspend', (c) => c.json({ code: 'externally_managed_computer', error: 'This is an externally managed shared computer. Suspend it through its owner or provider.' }, 409));
 
 api.get('/bots/:id/screenshot', async (c) => {
   const user = c.get('user');
@@ -432,11 +459,12 @@ api.get('/apps/callback', async (c) => {
   const slug = c.req.query('slug') ?? '';
   const botId = c.req.query('bot');
   const seq = Number(c.req.query('seq') ?? 0);
-  const ok = c.req.query('status') !== 'failed';
+  let ok = false;
   const userExists = db.prepare('SELECT 1 FROM users WHERE id=?').get(userId);
-  if (userExists && ok) {
+  if (userExists && c.req.query('status') !== 'failed') {
     const connected = await connectedToolkits(userId).catch(() => new Set<string>());
     if (connected.has(slug)) {
+      ok = true;
       hub.emit(userId, { type: 'connections' });
       if (botId && ownBot(userId, botId)) {
         const info = await toolkitInfo(slug);
@@ -448,7 +476,7 @@ api.get('/apps/callback', async (c) => {
       }
     }
   }
-  return c.html(`<!doctype html><meta charset="utf-8"><title>Connected</title><body style="font-family:system-ui;padding:40px;text-align:center">${ok ? 'Connected. You can close this window.' : 'Connection failed.'}<script>try{window.opener&&window.opener.postMessage({type:'grokbot-connected',slug:${JSON.stringify(slug)},ok:${ok}},'*')}catch(e){};setTimeout(()=>window.close(),800)</script></body>`);
+  return c.html(`<!doctype html><meta charset="utf-8"><title>Connected</title><body style="font-family:system-ui;padding:40px;text-align:center">${ok ? 'Connected. You can close this window.' : 'Connection failed.'}<script>try{window.opener&&window.opener.postMessage({type:'uap-connected',slug:${JSON.stringify(slug).replace(/</g, '\\u003c')},ok:${ok}},${JSON.stringify(new URL(env.appUrl).origin)})}catch(e){};setTimeout(()=>window.close(),800)</script></body>`);
 });
 
 api.delete('/apps/:slug', async (c) => {

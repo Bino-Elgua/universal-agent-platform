@@ -1,3 +1,5 @@
+import { isProviderConfigured } from '../lib/providers';
+import { readPreference } from '../lib/preferences';
 import { useEffect, useState } from 'react';
 import type { Routine } from '@shared/types';
 import { BotAvatarFor } from '../avatar/BotAvatar';
@@ -50,10 +52,11 @@ export function DetailsPanel() {
   const bot = useSelectedBot();
   const routines = useStore((s) => (bot ? s.routines[bot.id] : undefined));
   const computer = useStore((s) => s.computer);
+  const appsConfigured = useStore((s) => isProviderConfigured(s.providers, 'composio'));
   const viewerOpen = useStore((s) => s.viewerOpen);
   const set = useStore((s) => s.set);
   const [tab, setTab] = useState<'activity' | 'tasks' | 'library'>('activity');
-  const [hideSuggested, setHideSuggested] = useState(() => { try { return localStorage.getItem('grokbot.hideSuggested') === '1'; } catch { return false; } });
+  const [hideSuggested, setHideSuggested] = useState(() => { try { return readPreference('uap.hideSuggested') === '1'; } catch { return false; } });
   if (!bot) return null;
 
   const openComputer = (mode: ScreenMode) => set({ viewerOpen: true, viewerMode: mode, viewerHint: null });
@@ -120,15 +123,15 @@ export function DetailsPanel() {
                 <MembersCard room={bot} />
               </section>
             )}
-            {bot.kind !== 'room' && !hideSuggested && (
+            {bot.kind !== 'room' && !hideSuggested && appsConfigured && (
               <section>
                 <div className="section-label section-label--row">
                   <span>Suggested</span>
-                  <button type="button" className="link-btn link-btn--small" onClick={() => { setHideSuggested(true); try { localStorage.setItem('grokbot.hideSuggested', '1'); } catch { /* ignore */ } }}>Hide</button>
+                  <button type="button" className="link-btn link-btn--small" onClick={() => { setHideSuggested(true); try { localStorage.setItem('uap.hideSuggested', '1'); } catch { /* ignore */ } }}>Hide</button>
                 </div>
                 <div className="panel-card">
                   <button type="button" className="panel-row panel-row--link" onClick={addSlack}>
-                    <span className="panel-row__glyph"><ToolkitLogo name="Slack" logo="/assets/icons/slack.svg" size={16} radius={4} /></span>
+                    <span className="panel-row__glyph"><ToolkitLogo name="Slack" size={16} radius={4} /></span>
                     <span className="panel-row__title" style={{ flex: 1 }}>Add to Slack</span>
                     <Icon name="chev_right" size={12} opacity={0.56} />
                   </button>

@@ -1,20 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { Lightbulb } from 'lucide-react';
 import type { Bot, LiveState, Row } from '@shared/types';
 import { BotAvatarFor } from '../avatar/BotAvatar';
 import { activityPhrase, activityStatus, isWaitingForYou } from '../lib/phrases';
 import { duration } from '../lib/time';
 
 const CAPTION_FADE_MS = 320;
-
-/** A small glowing bulb that sits beside the mascot while the bot is thinking. */
-function IdeaBulb() {
-  return (
-    <svg className="thinking__idea" width="16" height="16" viewBox="0 0 24 24" aria-hidden>
-      <path className="thinking__idea-glass" d="M12 2.5a6.6 6.6 0 0 0-4.1 11.8c.7.55 1.1 1.3 1.1 2.1v.6h6v-.6c0-.8.4-1.55 1.1-2.1A6.6 6.6 0 0 0 12 2.5Z" />
-      <path className="thinking__idea-base" d="M9.6 18.4h4.8a.8.8 0 0 1 0 1.6H9.6a.8.8 0 0 1 0-1.6Zm.9 2.5h3a.8.8 0 0 1 0 1.6h-3a.8.8 0 0 1 0-1.6Z" />
-    </svg>
-  );
-}
 
 /** One line of live reasoning. When the text changes, the old line fades out under the new one. */
 function Caption({ text }: { text: string }) {
@@ -70,8 +61,8 @@ export function ThinkingBlock({ bot, live, rows, steps = 0 }: Props) {
   return (
     <div className={`thinking${waiting ? ' is-waiting' : ''}`}>
       <div className="thinking__badge">
-        <span className="thinking__mascot"><BotAvatarFor bot={bot} size={36} /></span>
-        {waiting ? <span className="thinking__alert" aria-hidden /> : <IdeaBulb />}
+        <span className="thinking__mascot"><BotAvatarFor bot={bot} size={36} state={waiting ? 'idle' : 'thinking'} /></span>
+        {waiting ? <span className="thinking__alert" aria-hidden /> : <Lightbulb className="thinking__idea" size={16} aria-hidden="true" />}
         <div className="thinking__pill" role="status" aria-live="polite">
           <span className="thinking__name">{bot.name}</span>
           <span className="thinking__status" key={status}>{status}</span>

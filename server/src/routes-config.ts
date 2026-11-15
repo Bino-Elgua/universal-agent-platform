@@ -44,7 +44,7 @@ configApi.get('/bots/:id/settings', (c) => {
     routines: listRoutines(b.id),
     tasks: listTasks(b.id),
     // The agent keeps its own memory and trims its own context; there is nothing for the app to maintain.
-    memory: { lastConsolidatedAt: null, historyChars: 0, compactAtChars: 0, lastCompaction: null },
+    memory: { lastConsolidatedAt: null, historyChars: null, compactAtChars: null, lastCompaction: null },
   });
 });
 
@@ -105,13 +105,13 @@ configApi.delete('/skills/:id', (c) => {
 configApi.post('/bots/:id/memories/consolidate', (c) => {
   const b = ownBot(c.get('user').id, c.req.param('id'));
   if (!b) return c.json({ error: 'not found' }, 404);
-  return c.json({ added: [], skipped: 0, considered: 0 });
+  return c.json({ code: 'managed_in_hermes', error: 'Memory consolidation is managed in Hermes. This gateway does not expose an authorized consolidation operation.' }, 409);
 });
 
 configApi.post('/bots/:id/compact', (c) => {
   const b = ownBot(c.get('user').id, c.req.param('id'));
   if (!b) return c.json({ error: 'not found' }, 404);
-  return c.json({ itemsBefore: 0, itemsAfter: 0, compacted: false });
+  return c.json({ code: 'managed_in_hermes', error: 'Context compaction is managed in Hermes. This gateway does not expose an authorized compaction operation.' }, 409);
 });
 
 // ---------- the agent behind a bot: model, sign-in, restart ----------
@@ -122,16 +122,15 @@ configApi.get('/bots/:id/engine', async (c) => {
   return c.json({ engine: await engineInfo(b.id) });
 });
 
-/** Which model this bot's turns ask for. Empty values go back to the agent's own default. */
-configApi.patch('/bots/:id/engine', async (c) => {
+/** Model selection belongs to Hermes; this gateway has no global configuration-write endpoint. */
+configApi.patch('/bots/:id/engine', (c) => {
   const b = ownBot(c.get('user').id, c.req.param('id'));
   if (!b) return c.json({ error: 'not found' }, 404);
-  const p = await c.req.json<{ provider?: string | null; model?: string | null }>().catch(() => ({} as { provider?: string | null; model?: string | null }));
-  const clean = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 120) : null);
-  if (p.provider !== undefined) db.prepare('UPDATE bots SET provider=?, updated_at=? WHERE id=?').run(clean(p.provider), now(), b.id);
-  if (p.model !== undefined) db.prepare('UPDATE bots SET model=?, updated_at=? WHERE id=?').run(clean(p.model), now(), b.id);
-  emitBot(b.id);
-  return c.json({ engine: await engineInfo(b.id) });
+  return c.json({
+    error: 'Change the configured model and provider in Hermes, then refresh this panel.',
+    code: 'configuration_in_hermes',
+    configurationMode: 'in_hermes',
+  }, 409);
 });
 
 /**

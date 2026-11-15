@@ -4,6 +4,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { env } from '../env.js';
 import { db, now } from '../db.js';
 import { token } from './ids.js';
+import { deployment } from '../deployment.js';
 import type { User } from '../types.js';
 
 const COOKIE = 'grokbot_session';
@@ -12,6 +13,7 @@ const TTL_MS = 30 * 24 * 3600 * 1000;
 export type AuthVars = { Variables: { user: User } };
 
 export function createSession(c: Context, userId: string) {
+  deployment.requireOwner(userId);
   const t = token();
   db.prepare('INSERT INTO auth_sessions(token,user_id,created_at,expires_at) VALUES (?,?,?,?)').run(t, userId, now(), now() + TTL_MS);
   setCookie(c, COOKIE, t, { httpOnly: true, sameSite: 'Lax', secure: env.appUrl.startsWith('https:'), path: '/', maxAge: TTL_MS / 1000 });
@@ -28,7 +30,7 @@ export function userFromToken(t: string | undefined): User | null {
   const r = db
     .prepare('SELECT u.* FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>?')
     .get(t, now()) as any;
-  return r ? { id: r.id, email: r.email, name: r.name, avatarUrl: r.avatar_url } : null;
+  return r && deployment.isOwner(r.id) ? { id: r.id, email: r.email, name: r.name, avatarUrl: r.avatar_url } : null;
 }
 
 export function userFromCookieHeader(cookieHeader: string | undefined): User | null {

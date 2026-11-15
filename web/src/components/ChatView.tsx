@@ -38,7 +38,7 @@ export function ChatView() {
       <header className="chat__header">
         <span className="chat__pill-anchor">
           <button type="button" className="chat__pill" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}>
-            <BotAvatarFor bot={bot} size={24} />
+            <BotAvatarFor bot={bot} size={24} state={live?.isRunning ? 'working' : 'idle'} />
             <span className="chat__pill-name">{displayName(bot)}</span>
           </button>
           {menu && (
@@ -60,7 +60,6 @@ export function ChatView() {
               <Icon name="sidebar" opacity={0.66} style={{ transform: 'scaleX(-1)' }} />
             </button>
           )}
-          <button type="button" className="share-btn" onClick={() => flash('Sharing isn’t available in Grokbot yet')}>Share</button>
         </div>
       </header>
       {toast && <div className="toast" role="status">{toast}</div>}

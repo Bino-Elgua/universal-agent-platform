@@ -1,10 +1,10 @@
 # Third-party notices
 
-Bot HQ is MIT-licensed (see `LICENSE`). It bundles or depends on the third-party work listed below. npm dependencies not listed here are covered by their own licenses, included in their packages.
+Universal Agent Platform derives from the MIT-licensed Bot HQ codebase (see `LICENSE`, including the original copyright attribution). It bundles or depends on the third-party work listed below. npm dependencies not listed here are covered by their own licenses, included in their packages.
 
 ## Lucide icons
 
-The web UI's icons come from [Lucide](https://lucide.dev), via the `lucide-react` package (pinned to 1.61.0 in `web/package.json`). The original UI glyphs have been restored; Lucide remains listed here while its dependency is retained.
+The web UI's icons come from [Lucide](https://lucide.dev), via the `lucide-react` package (pinned to 1.61.0 in `web/package.json`). Lucide supplies the interface glyphs. Product-specific glyph exports have been removed.
 
 ```
 ISC License
@@ -48,8 +48,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Restored UI artwork
+## Original platform artwork
 
-The original UI artwork is restored from the project's design export: bot silhouettes and eyes (`web/artwork/` and `web/src/avatar/shapes.gen.ts`), UI icons and app tiles (`web/public/assets/`), and the favicon. Artwork originating in xAI/Cursor's Grok Bot app and third-party app logos remains the property of its respective owners; the project's MIT license does not grant rights to that artwork. Inclusion does not imply affiliation or endorsement.
+The geometric node badges in `web/src/avatar/`, the SVG favicon in `web/public/favicon.svg`, and the replacement palette were authored for this platform. Badge asset version: 1. No upstream mascot paths or traced artwork are used in these files. These first-party additions use the repository's MIT license.
 
-App logos supplied at runtime by Composio also remain the property of their respective owners. The Google sign-in mark is a trademark of Google LLC.
+The original `web/artwork/`, `web/public/assets/`, generated upstream avatar paths, favicon, and promotional `assets/` screenshots/logo/banner were removed from the working distribution because the upstream notice excluded rights to xAI/Cursor artwork. Their presence in upstream Git history does not grant commercial reuse rights.
+
+## Runtime service marks
+
+App logos supplied at runtime by Composio remain the property of their respective owners and identify connected services. Inclusion does not imply affiliation or endorsement. No third-party app logos or Google sign-in mark are bundled in the replacement UI.
+
+## Review status
+
+These notices record source provenance and removals. They do not constitute trademark clearance, legal approval, a review of every dependency/model license, or permission to use user-supplied artwork. The descriptive name Universal Agent Platform remains provisional pending commercial name and domain clearance.

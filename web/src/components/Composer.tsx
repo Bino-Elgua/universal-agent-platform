@@ -1,3 +1,4 @@
+import { isProviderConfigured, providerRecovery } from '../lib/providers';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Bot } from '@shared/types';
 import { api } from '../lib/api';
@@ -17,6 +18,8 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
   const [menu, setMenu] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const setModal = useStore((s) => s.setModal);
+  const voiceConfigured = useStore((s) => isProviderConfigured(s.providers, 'xai'));
+  const appsConfigured = useStore((s) => isProviderConfigured(s.providers, 'composio'));
 
   // Per-bot drafts.
   useEffect(() => { setText(drafts.get(bot.id) ?? ''); setError(null); ref.current?.focus(); }, [bot.id]);
@@ -80,6 +83,7 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
   return (
     <div className="composer-area">
       {error && <div className="composer__error">{error} <button type="button" className="link-btn" onClick={() => setError(null)}>Dismiss</button></div>}
+      {!voiceConfigured && !inCall && <div className="cfg-field__hint" role="status">{providerRecovery.xai}</div>}
       <div className={`composer${multiline ? ' is-multiline' : ''}`}>
         <div className="composer__left">
           <span className="composer__plus-anchor">
@@ -92,7 +96,7 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
                 onClose={() => setMenu(false)}
                 items={[
                   { label: 'New conversation', onSelect: fresh },
-                  { label: 'Connect apps', onSelect: () => setModal('apps') },
+                  { label: appsConfigured ? 'Connect apps' : 'App connection settings', onSelect: () => setModal('apps') },
                 ]}
               />
             )}
@@ -116,8 +120,8 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
             className={`composer__btn${dictation.state === 'recording' ? ' is-recording' : dictation.state === 'transcribing' ? ' is-transcribing' : ''}`}
             aria-label={dictation.state === 'recording' ? 'Stop dictation' : 'Dictate'}
             aria-pressed={dictation.state === 'recording'}
-            title={dictation.state === 'recording' ? 'Release or click to stop · Esc cancels' : dictation.state === 'transcribing' ? 'Transcribing…' : 'Hold to dictate, or click to start'}
-            disabled={dictation.state === 'transcribing'}
+            title={!voiceConfigured && dictation.state !== 'recording' ? providerRecovery.xai : dictation.state === 'recording' ? 'Release or click to stop · Esc cancels' : dictation.state === 'transcribing' ? 'Transcribing…' : 'Hold to dictate, or click to start'}
+            disabled={dictation.state === 'transcribing' || (!voiceConfigured && dictation.state !== 'recording')}
             onPointerDown={dictation.onPointerDown}
             onPointerUp={dictation.onPointerUp}
             onKeyDown={dictation.onKeyDown}
@@ -138,9 +142,9 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
               type="button"
               className="composer__cta"
               onClick={hasText ? send : () => startCall(bot.id)}
-              disabled={hasText && sending}
+              disabled={hasText ? sending : !voiceConfigured}
               aria-label={hasText ? 'Send' : `Start voice chat with ${bot.name}`}
-              title={hasText ? 'Send (Enter)' : 'Start voice chat'}
+              title={hasText ? 'Send (Enter)' : voiceConfigured ? 'Start voice chat' : providerRecovery.xai}
             >
               <Icon name={hasText ? 'arrow_up' : 'voice_a'} size={16} />
             </button>

@@ -21,7 +21,7 @@ export interface BotSettingsBundle {
   skills: Skill[];
   routines: Routine[];
   tasks: Task[];
-  memory: { lastConsolidatedAt: number | null; historyChars: number; compactAtChars: number; lastCompaction: { method: string; created_at: number } | null };
+  memory: { lastConsolidatedAt: number | null; historyChars: number | null; compactAtChars: number | null; lastCompaction: { method: string; created_at: number } | null };
 }
 
 export interface LibraryListing { status: 'ok' | 'asleep' | 'error'; path: string; files: LibraryFile[]; error?: string }

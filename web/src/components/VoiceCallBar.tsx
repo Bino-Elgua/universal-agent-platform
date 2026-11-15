@@ -1,3 +1,4 @@
+import { Mic, MicOff, PhoneOff } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { BotAvatarFor } from '../avatar/BotAvatar';
 import { botVars } from '../lib/colors';
@@ -5,22 +6,10 @@ import { useStore } from '../store';
 import { callLevels, endCall, toggleMute, useVoice } from '../voice/call';
 
 function MicGlyph({ off }: { off?: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-      {off && <path d="M4 4l16 16" />}
-    </svg>
-  );
+  const Symbol = off ? MicOff : Mic;
+  return <Symbol size={16} aria-hidden="true" />;
 }
-
-function HangUpGlyph() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
-      <path fill="currentColor" d="M12 9.5c-2.6 0-5.1.5-7.3 1.6-.7.3-1.2 1-1.2 1.8v2.3c0 .8.7 1.4 1.5 1.3l3-.4c.7-.1 1.2-.7 1.2-1.4v-1.6c1.8-.5 3.8-.5 5.6 0v1.6c0 .7.5 1.3 1.2 1.4l3 .4c.8.1 1.5-.5 1.5-1.3v-2.3c0-.8-.5-1.5-1.2-1.8-2.2-1.1-4.7-1.6-7.3-1.6Z" />
-    </svg>
-  );
-}
+function HangUpGlyph() { return <PhoneOff size={18} aria-hidden="true" />; }
 
 const fmt = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -91,7 +80,7 @@ export function VoiceCallBar() {
       <div className="vcall__main">
         <span className="vcall__avatar" ref={avatarRef}>
           <span className="vcall__halo" aria-hidden />
-          <BotAvatarFor bot={bot} size={36} />
+          <BotAvatarFor bot={bot} size={36} state={v.status === 'error' ? 'error' : v.speaking ? 'speaking' : v.listening ? 'listening' : working ? 'working' : 'thinking'} />
         </span>
         <div className="vcall__info">
           <div className="vcall__title">
