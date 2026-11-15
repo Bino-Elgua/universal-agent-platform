@@ -1,0 +1,2 @@
+# Preserve the supplied blueprint verbatim, including Markdown hard line breaks.
+docs/implementation/master-blueprint-v2.md -whitespace

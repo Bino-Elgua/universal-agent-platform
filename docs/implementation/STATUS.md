@@ -62,7 +62,7 @@ Original node badges, Lucide glyphs and a neutral palette replace excluded artwo
 - `npm run audit:branding`: passed; excludes 69 upstream artifact hashes from source/public/build paths. This is distribution hygiene, not trademark/legal clearance.
 - `npm run test:browser`: actual Chromium against the compiled local server, real HTTP/session/SQLite and original UI, with temporary data. Covers owner link login, provider gating, read-only Hermes display, primary protection, identity after reload, missing assets/runtime errors and a 390px viewport.
 - Browser evidence is generated under `tests/out/foundation/` (ignored locally and uploaded by CI). Screenshots: `signin.png`, `owner-workspace.png`, `owner-mobile.png`; structured result: `report.json`.
-- `git diff --check`: passed.
+- `git diff --check`: passed. The verbatim supplied blueprint is exempt from whitespace lint so its original Markdown hard line breaks remain intact.
 - CI workflow `.github/workflows/foundation.yml` runs clean install, local checks, browser verification and artifact upload. The workflow has been authored; no hosted CI run is claimed.
 
 Independent diff review identified OAuth cleanup/binding/script-injection and unproven process-cleanup issues. Regression fixes and targeted tests were added before recording these results.
