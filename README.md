@@ -4,6 +4,8 @@ An implementation of the [Master Blueprint v2](docs/implementation/master-bluepr
 
 This checkout currently supports the upstream **single-owner self-hosted architecture**. It shares the owner's computer and operating-system identity; agent screens are not security sandboxes. Hosted multi-tenant operation remains blocked until the data, credential and runtime isolation gates pass.
 
+The [storage operator guide](docs/implementation/storage-foundation.md) documents versioned SQLite upgrades, PostgreSQL tenant metadata, and the staged import tools. PostgreSQL has not replaced the running application database.
+
 See [implementation evidence](docs/implementation/STATUS.md), [tenant audit](docs/implementation/tenant-audit.md), and [candidate source review](docs/implementation/source-inventory.md) for what has actually been inspected and tested.
 
 ## Local setup
@@ -60,6 +62,14 @@ npm run check
 ```
 
 This runs TypeScript checks, isolated contract/integration tests, the production build and branding hygiene audit. Tests use temporary databases and identified test fixtures. Existing `tests/e2e.mjs` and `tests/voice-call.mjs` require real Hermes/Orgo/xAI/Composio services and can create resources. They are separate release gates; passing local checks does not imply they passed.
+
+The PostgreSQL checks run separately against real PostgreSQL, with a new database and unprivileged application login for each test file:
+
+```sh
+npm run test:postgres
+```
+
+By default the runner starts and removes a pinned local Docker PostgreSQL container. A local `TEST_POSTGRES_ADMIN_URL` can target an existing test server instead; only generated test databases/roles are created and removed. The URL is checked against pg's effective connection target so query parameters cannot redirect tests or override the generated database/identity.
 
 Original geometric avatars and a neutral theme replace the upstream excluded artwork. [Third-party notices](THIRD_PARTY_NOTICES.md) retain source attribution. `audit:branding` detects excluded upstream asset hashes and stale bundled asset references; it does not establish trademark clearance or legal approval.
 

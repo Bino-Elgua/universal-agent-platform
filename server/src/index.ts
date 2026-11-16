@@ -11,8 +11,6 @@ import { attachVncRelay } from './vnc.js';
 import { initRoutines } from './routines.js';
 import { initTriggers } from './triggers.js';
 import { initProactive } from './proactive.js';
-import { initSubagents } from './agent/subagents.js';
-import { initRooms } from './agent/rooms.js';
 import { checkinsApi } from './routes-proactive.js';
 import { roomsApi } from './routes-rooms.js';
 import { enqueue, expireStaleApprovals } from './agent/loop.js';
@@ -23,8 +21,6 @@ import { mcpApi } from './mcp.js';
 import { initEngines } from './engine.js';
 
 if (!desSelfTest()) throw new Error('DES self-test failed');
-initSubagents();
-initRooms();
 // Approvals wait in memory; whatever was still open when the last process stopped can no longer be answered.
 expireStaleApprovals();
 

@@ -26,3 +26,34 @@ jobs:
           name: foundation-browser-evidence
           path: tests/out/foundation/
           if-no-files-found: ignore
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
+        env:
+          POSTGRES_PASSWORD: uap-ci-fixture-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:postgres
+        env:
+          TEST_POSTGRES_ADMIN_URL: postgres://postgres:uap-ci-fixture-only@127.0.0.1:5432/postgres
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: postgres-storage-evidence
+          path: tests/out/postgres/
+          if-no-files-found: ignore

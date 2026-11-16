@@ -9,15 +9,6 @@ import { db, now } from './db.js';
 let enqueueFn: ((botId: string, t: any) => void) | null = null;
 
 export function initProactive(enqueue: (botId: string, t: any) => void) {
-  db.exec(`CREATE TABLE IF NOT EXISTS proactivity (
-    user_id TEXT PRIMARY KEY,
-    enabled INTEGER NOT NULL DEFAULT 0,
-    times TEXT NOT NULL DEFAULT '["09:00","16:30"]',
-    timezone TEXT NOT NULL DEFAULT 'UTC',
-    last_fired TEXT,
-    silent_streak INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL
-  )`);
   enqueueFn = enqueue;
   setInterval(tick, 60_000).unref();
   console.log(`[proactive] ${(db.prepare('SELECT COUNT(*) n FROM proactivity WHERE enabled=1').get() as any).n} user(s) with check-ins`);

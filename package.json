@@ -11,10 +11,12 @@
     "build": "npm run build -w web && npm run build -w server",
     "start": "npm run start -w server",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --import tsx --test tests/*.test.mjs",
     "audit:branding": "node scripts/audit-branding.mjs",
     "check": "npm run typecheck && npm test && npm run build && npm run audit:branding",
-    "test:browser": "node tests/browser-smoke.mjs"
+    "test:browser": "node tests/browser-smoke.mjs",
+    "test:postgres": "node scripts/test-postgres.mjs",
+    "db:postgres": "node --import tsx server/src/storage/postgres/cli.ts"
   },
   "engines": {
     "node": ">=22"

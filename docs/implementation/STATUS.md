@@ -1,4 +1,4 @@
-# Implementation evidence — 2026-11-15
+# Implementation evidence — updated 2026-11-16
 
 Specification: [Master Blueprint v2](master-blueprint-v2.md). This checkout is an in-development single-owner self-hosted foundation. It is not a commercial release or a completed multi-tenant platform.
 
@@ -8,7 +8,7 @@ Specification: [Master Blueprint v2](master-blueprint-v2.md). This checkout is a
 | --- | --- | --- |
 | WP-01 | Exact Bot HQ baseline, clean installation, build/typecheck, lockfile license metadata inventory; six candidate source checkouts statically inspected and pinned | Live upstream provider E2Es, complete dependency/model/asset rights review, missing OKF source and custom Agency fork |
 | WP-02 | Original geometric badges for all 25 persisted shape IDs, activity states/reduced motion, neutral theme/favicon/package identifiers, licensed Lucide glyphs; excluded artwork removed; browser preference compatibility | Final commercial brand/domain and rights clearance; avatar uploads/moderation not implemented |
-| WP-03 | Transactional single-owner setup, legacy owner migration, rejection of ambiguous/multi-user legacy installs, session owner enforcement; account/profile rollback and restart tests | PostgreSQL async repositories, organizations/workspaces/RBAC/RLS, SQLite import/export, durable orchestration and tenant-isolated runtimes |
+| WP-03 | Single-owner safeguards; six checksummed transactional SQLite migrations; PostgreSQL tenant metadata schema, async workspace/agent repository, FORCE RLS, role restrictions, safe read-only inspection and idempotent metadata staging | PostgreSQL sessions/history/jobs/runtime repositories and API cutover, full account export/import, restore rehearsal, durable orchestration and tenant-isolated runtimes |
 | WP-04 | Optional credential boot, lazy clients, pre-I/O configuration guards, truthful health configuration states, disabled-provider tool/UI gating, real voice catalog error/retry, no fabricated options | Full versioned registry/conformance, per-tenant encrypted credentials, capability probes, budget/entitlement grants and live provider testing |
 | WP-05 | Sticky external-primary binding, protected primary files/process, managed path/process ownership checks, opt-in credential inheritance; gateway-only default model reporting | Authorized remote pairing/tunnel, revocation, managed hosting, live Hermes acceptance, supported authorized gateway model mutation |
 
@@ -57,7 +57,8 @@ Original node badges, Lucide glyphs and a neutral palette replace excluded artwo
 ## Validation
 
 - `npm run typecheck`: passed.
-- `npm test`: **29 passed**, 0 failed. Includes real isolated SQLite/API/startup tests and clearly identified unit-only SDK/local gateway fixtures. No live provider credentials were used.
+- `npm test`: **50 passed**, 0 failed (the original 29 plus storage migration, source/CLI and test-harness cases). Includes real isolated SQLite/API/startup tests and clearly identified unit-only SDK/local gateway fixtures. No live provider credentials were used.
+- `npm run test:postgres`: **24 passed**, 0 failed, against actual PostgreSQL 16.16. Each test file uses a separate temporary database and nonprivileged login; generated roles/databases and the disposable container were removed. Image ID `sha256:3cbd775daa28461ef484ed88ca1e5a5a72ff126e196deeebce6fec764edf1200`; pinned registry digest and operator instructions are in the storage guide.
 - `npm run build`: passed for web and server.
 - `npm run audit:branding`: passed; excludes 69 upstream artifact hashes from source/public/build paths. This is distribution hygiene, not trademark/legal clearance.
 - `npm run test:browser`: actual Chromium against the compiled local server, real HTTP/session/SQLite and original UI, with temporary data. Covers owner link login, provider gating, read-only Hermes display, primary protection, identity after reload, missing assets/runtime errors and a 390px viewport.
@@ -71,7 +72,19 @@ Not run: original `tests/e2e.mjs` / `tests/voice-call.mjs` against real Hermes/O
 
 ## Next implementation dependencies
 
-1. Complete the tenant/async PostgreSQL repository migration, with actual two-tenant database/API denial tests and preserved SQLite export/import evidence.
+1. Continue async PostgreSQL repositories for sessions, conversation history, tasks/approvals and runtime records, then authenticated API cutover. Direct database/repository two-tenant denial is tested; public multi-tenant API denial and complete account-data import/restore remain pending.
 2. Implement scoped provider connections, registry contracts and worker-boundary policy/budget enforcement; replace shared-runtime authority before enabling hosted accounts.
 3. Implement and verify authorized Hermes pairing against the pinned real runtime, then complete computer/voice/connector conformance.
 4. Continue the audited SID/role/security/media/lab adapters in the blueprint's order. Parallax demo credit/mock/alternate-reasoning paths must not be copied into production; Cloud Attack Range needs durable expiry/verified teardown, not only expiration metadata.
+
+## Storage continuation — 2026-11-16
+
+[Storage operator guide](storage-foundation.md) documents the implemented commands and current limits. SQLite schema setup is centralized in six atomic, checksummed migrations, with legacy data/default/index/FK verification. Owner policy remains separate from schema creation. Applied migration drift or failed batches stop without rewriting existing rows.
+
+The PostgreSQL metadata domain now has organizations, scoped memberships/workspaces/agents, composite tenant FKs and import receipts. Repository calls use a direct application login, explicit active actor scope, transaction-local settings and cleared pooled context. Tests exercise viewer/suspended/cross-tenant denial, matching IDs across organizations, privilege drift, rollback, lock timeout and concurrent migration runners. The metadata repository is not wired to public authentication or agent execution; existing SQLite authority remains active.
+
+The CLI can migrate/status/grant an existing restricted application role, inspect a stopped rollback-journal SQLite backup, and dry-run or explicitly apply inactive metadata staging. It requires one source user, records excluded/unmapped counts and logical source digests, omits sessions/instructions/provider/runtime fields, rejects collisions and verifies real rows on repeat imports. This is not a full account migration or permission to start imported agents. WAL-mode headers and any journal/WAL/SHM sidecars are rejected before SQLite opens, avoiding reader changes to live shared-memory files.
+
+Review fixes include effective pg URL target validation (query parameters cannot override a loopback host or generated test database), WAL source rejection, inherited CREATEDB rejection, and migration transaction-control lint with PostgreSQL dollar-quote/Unicode/comment handling. Migration SQL remains trusted source code; lint is not an untrusted-SQL sandbox.
+
+The pinned PostgreSQL test job has been added to CI and its YAML parsed locally. No hosted CI, production database migration, application storage cutover, cloud provisioning or customer resource action is claimed.

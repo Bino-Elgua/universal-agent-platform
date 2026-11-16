@@ -17,11 +17,6 @@ db.transaction(() => {
   if (users.length > 1) {
     throw new DeploymentOwnershipError('Multiple legacy accounts were found on a shared runtime. Startup is blocked. Back up and export accounts into separate installations before retrying; no account has been selected or deleted.');
   }
-  db.exec(`CREATE TABLE IF NOT EXISTS deployment_binding (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    owner_user_id TEXT UNIQUE REFERENCES users(id) ON DELETE RESTRICT,
-    primary_bot_id TEXT UNIQUE
-  )`);
   db.prepare('INSERT OR IGNORE INTO deployment_binding(singleton) VALUES (1)').run();
   const binding = db.prepare('SELECT * FROM deployment_binding WHERE singleton=1').get() as Binding;
   const primary = db.prepare("SELECT id, user_id FROM bots WHERE engine='primary'").all() as { id: string; user_id: string }[];

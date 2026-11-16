@@ -128,8 +128,6 @@ test('model PATCH gives change-in-Hermes guidance without mutating historical st
 
 test('turns use the gateway default alias, ignore SQLite overrides, and never fall back', { timeout: 25000 }, async () => {
   await scenario(`
-    const { initRooms } = await import('./server/src/agent/rooms.ts'); initRooms();
-    const { initSubagents } = await import('./server/src/agent/subagents.ts'); initSubagents();
     const { enqueue, runInBotQueue } = await import('./server/src/agent/loop.ts');
     enqueue('bot_primary', { type: 'user', text: 'first fixture request' });
     await runInBotQueue('bot_primary', async () => {});
