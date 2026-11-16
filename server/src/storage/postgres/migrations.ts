@@ -113,13 +113,19 @@ export async function grantApplicationRole(pool: Pool, role: string): Promise<vo
       UNION ALL SELECT 1 FROM pg_namespace WHERE nspname='uap' AND pg_has_role($1::oid,nspowner,'MEMBER')
       UNION ALL SELECT 1 FROM pg_database WHERE datname=current_database() AND pg_has_role($1::oid,datdba,'MEMBER') LIMIT 1`, [application.oid]);
     if (privilegedMembership.rowCount || ownership.rowCount) throw new PostgresMigrationError('Application role must not inherit an elevated role or own the database or uap schema/tables.');
+    const issuerRights = await client.query(`SELECT 1 FROM pg_roles candidate
+      WHERE pg_has_role($1::oid,candidate.oid,'MEMBER') AND
+        has_table_privilege(candidate.oid,'uap.auth_sessions','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') LIMIT 1`, [application.oid]);
+    if (issuerRights.rowCount) throw new PostgresMigrationError('Application role inherits unsupported schema/table privileges or session issuance rights; separate credentials are required.');
     await client.query(`REVOKE ALL ON SCHEMA uap FROM ${quoted}`);
     await client.query(`REVOKE ALL ON ALL TABLES IN SCHEMA uap FROM ${quoted}`);
     await client.query(`REVOKE ALL ON ALL FUNCTIONS IN SCHEMA uap FROM ${quoted}`);
     await client.query(`GRANT USAGE ON SCHEMA uap TO ${quoted}`);
-    await client.query(`GRANT SELECT ON uap.users,uap.organizations,uap.memberships,uap.workspaces,uap.agents,uap.import_receipts TO ${quoted}`);
+    await client.query(`GRANT SELECT ON uap.users,uap.organizations,uap.memberships,uap.workspaces,uap.agents,uap.import_receipts,uap.history_import_receipts TO ${quoted}`);
     await client.query(`GRANT INSERT,UPDATE,DELETE ON uap.workspaces,uap.agents TO ${quoted}`);
-    await client.query(`GRANT EXECUTE ON FUNCTION uap.has_org_role(text,text[]) TO ${quoted}`);
+    await client.query(`GRANT SELECT,INSERT,UPDATE ON uap.conversations,uap.message_rows TO ${quoted}`);
+    await client.query(`GRANT SELECT,INSERT ON uap.llm_items TO ${quoted}`);
+    await client.query(`GRANT EXECUTE ON FUNCTION uap.has_org_role(text,text[]),uap.authenticate_session(text),uap.revoke_session(text) TO ${quoted}`);
     // Direct revocation does not remove privileges inherited from another role.
     // Reject such a configuration instead of pretending least privilege was set.
     const forbidden = await client.query(`SELECT 1 FROM pg_roles AS candidate
@@ -131,6 +137,11 @@ export async function grantApplicationRole(pool: Pool, role: string): Promise<vo
       has_table_privilege(candidate.oid,'uap.import_receipts','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
       has_table_privilege(candidate.oid,'uap.workspaces','TRUNCATE,REFERENCES,TRIGGER') OR
       has_table_privilege(candidate.oid,'uap.agents','TRUNCATE,REFERENCES,TRIGGER') OR
+      has_table_privilege(candidate.oid,'uap.conversations','DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
+      has_table_privilege(candidate.oid,'uap.message_rows','DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
+      has_table_privilege(candidate.oid,'uap.llm_items','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
+      has_table_privilege(candidate.oid,'uap.auth_sessions','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
+      has_table_privilege(candidate.oid,'uap.history_import_receipts','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
       has_schema_privilege(candidate.oid,'uap','CREATE')) LIMIT 1`, [application.oid]);
     if (forbidden.rowCount) throw new PostgresMigrationError('Application role inherits unsupported schema/table privileges; isolate it before granting access.');
     await client.query('COMMIT');

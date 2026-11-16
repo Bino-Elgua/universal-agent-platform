@@ -50,7 +50,7 @@ function timestamp(value: unknown, field: string): number {
   if (typeof number !== 'number' || !Number.isSafeInteger(number) || number < 0) throw new SqliteImportError(`Invalid ${field}; no import was performed.`);
   return number;
 }
-function validateTarget(options: SqliteImportOptions): void {
+export function validateSqliteImportTarget(options: SqliteImportOptions): void {
   text(options.organizationId, 'organization ID'); text(options.workspaceId, 'workspace ID');
   text(options.organizationName, 'organization name'); text(options.workspaceName, 'workspace name');
   if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(options.organizationSlug)) throw new SqliteImportError('Invalid organization slug; no import was performed.');
@@ -71,7 +71,7 @@ function offlineRollbackSource(sourcePath: string): string {
 }
 
 /** Requires a stopped rollback-journal backup; WAL inputs are rejected before SQLite opens. */
-export function inspectSqliteSource(sourcePath: string): SqliteFoundationSnapshot {
+export function withSqliteFoundationSnapshot<T>(sourcePath: string, read: (source: Database.Database, snapshot: SqliteFoundationSnapshot) => T): T {
   let source: Database.Database | undefined;
   try {
     const offlineSource = offlineRollbackSource(sourcePath);
@@ -121,12 +121,19 @@ export function inspectSqliteSource(sourcePath: string): SqliteFoundationSnapsho
       sourceDigest: digest({ mappingVersion: SQLITE_FOUNDATION_MAPPING_VERSION, tables }), user, agents,
       counts: { users: 1, agents: agents.length, excludedRooms, sourceTables, unmappedTables },
     };
+    const result = read(source, snapshot);
+    if (result && typeof result === 'object' && 'then' in result) throw new SqliteImportError('SQLite snapshot readers must complete synchronously.');
     source.exec('ROLLBACK');
-    return snapshot;
+    return result;
   } catch (error) {
     if (error instanceof SqliteImportError) throw error;
     throw new SqliteImportError('Could not inspect the SQLite source in read-only mode; no import was performed.');
   } finally { source?.close(); }
+}
+
+/** Default metadata inspection still exports no transcript, LLM items or credentials. */
+export function inspectSqliteSource(sourcePath: string): SqliteFoundationSnapshot {
+  return withSqliteFoundationSnapshot(sourcePath, (_source, snapshot) => snapshot);
 }
 
 function targetMetadata(options: SqliteImportOptions, snapshot: SqliteFoundationSnapshot) {
@@ -135,7 +142,8 @@ function targetMetadata(options: SqliteImportOptions, snapshot: SqliteFoundation
     fingerprintScope, runtimeState: 'inactive_metadata_only', recordsDigest: digest({ user: snapshot.user, agents: snapshot.agents }) };
 }
 async function verifyExisting(client: PoolClient, options: SqliteImportOptions, snapshot: SqliteFoundationSnapshot, receipt: Record<string, unknown>): Promise<void> {
-  if (receipt.mapping_version !== SQLITE_FOUNDATION_MAPPING_VERSION || canonical(receipt.metadata) !== canonical(targetMetadata(options, snapshot)) || canonical(receipt.counts) !== canonical(snapshot.counts)) throw new SqliteImportError('Existing receipt does not match this mapping or target; no import was performed.');
+  const exactReceipt = (await client.query('SELECT counts=$1::jsonb AS counts_match,metadata=$2::jsonb AS metadata_match FROM uap.import_receipts WHERE organization_id=$3 AND id=$4', [JSON.stringify(snapshot.counts),JSON.stringify(targetMetadata(options,snapshot)),options.organizationId,receipt.id])).rows[0];
+  if (receipt.mapping_version !== SQLITE_FOUNDATION_MAPPING_VERSION || !exactReceipt?.counts_match || !exactReceipt?.metadata_match || canonical(receipt.metadata) !== canonical(targetMetadata(options, snapshot)) || canonical(receipt.counts) !== canonical(snapshot.counts)) throw new SqliteImportError('Existing receipt does not match this mapping or target; no import was performed.');
   const user = (await client.query('SELECT id,email,name,created_at FROM uap.users WHERE id=$1', [snapshot.user.id])).rows[0];
   const organization = (await client.query('SELECT id,slug,name,created_at FROM uap.organizations WHERE id=$1', [options.organizationId])).rows[0];
   const workspace = (await client.query('SELECT id,organization_id,name,created_at FROM uap.workspaces WHERE organization_id=$1 AND id=$2', [options.organizationId, options.workspaceId])).rows[0];
@@ -151,14 +159,25 @@ async function verifyExisting(client: PoolClient, options: SqliteImportOptions, 
   for (let index = 0; index < agents.length; index++) {
     const actual = agents[index]; const expected = expectedAgents.get(actual.id);
     if (!expected) throw new SqliteImportError('Imported target records have changed; idempotent verification failed.');
+    const exactProfile = (await client.query('SELECT profile=$1::jsonb AS matches FROM uap.agents WHERE organization_id=$2 AND id=$3', [JSON.stringify(expected.profile),options.organizationId,actual.id])).rows[0];
+    if (!exactProfile?.matches) throw new SqliteImportError('Imported target records have changed; idempotent verification failed.');
     if (actual.id !== expected.id || actual.workspace_id !== options.workspaceId || actual.owner_user_id !== snapshot.user.id || actual.name !== expected.name ||
         canonical(actual.profile) !== canonical(expected.profile) || String(actual.created_at) !== String(expected.createdAt) || String(actual.updated_at) !== String(expected.updatedAt)) throw new SqliteImportError('Imported target records have changed; idempotent verification failed.');
   }
 }
 
+/** Verify an existing foundation without creating or updating metadata. Caller owns its transaction. */
+export async function verifyFoundationImport(client: PoolClient, options: SqliteImportOptions, snapshot: SqliteFoundationSnapshot): Promise<string> {
+  validateSqliteImportTarget(options);
+  const result = await client.query('SELECT id,mapping_version,counts,metadata FROM uap.import_receipts WHERE organization_id=$1 AND source_digest=$2', [options.organizationId, snapshot.sourceDigest]);
+  if (result.rows.length !== 1) throw new SqliteImportError('A matching verified foundation import is required before staging conversation history.');
+  await verifyExisting(client, options, snapshot, result.rows[0]);
+  return result.rows[0].id;
+}
+
 /** Operator-only metadata staging. apply=false does not connect to PostgreSQL. */
 export async function importSqliteFoundation(adminPool: Pool | null, options: SqliteImportOptions): Promise<SqliteImportReport> {
-  validateTarget(options);
+  validateSqliteImportTarget(options);
   const snapshot = inspectSqliteSource(options.sourcePath);
   const report: SqliteImportReport = { status: 'dry_run', mappingVersion: snapshot.mappingVersion, sourceDigest: snapshot.sourceDigest,
     fingerprintScope, organizationId: options.organizationId, workspaceId: options.workspaceId, counts: snapshot.counts,

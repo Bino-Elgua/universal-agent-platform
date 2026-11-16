@@ -1,3 +1,5 @@
+import { SESSION_MIGRATION } from './sessions-schema.js';
+import { HISTORY_IMPORT_MIGRATION } from './history-import-schema.js';
 /** Embedded migrations ship unchanged with the compiled service. Never edit an applied entry. */
 export interface PostgresMigration {
   id: number;
@@ -140,4 +142,78 @@ CREATE POLICY import_receipts_member_read ON uap.import_receipts FOR SELECT USIN
 REVOKE ALL ON ALL TABLES IN SCHEMA uap FROM PUBLIC;
 REVOKE ALL ON SCHEMA uap FROM PUBLIC;
 `,
-}];
+}, {
+  id: 2,
+  name: 'tenant_conversation_history',
+  sql: `
+CREATE TABLE uap.conversations (
+  organization_id text NOT NULL,
+  agent_id text NOT NULL,
+  generation bigint NOT NULL CHECK (generation >= 1),
+  next_seq bigint NOT NULL DEFAULT 1 CHECK (next_seq >= 1),
+  revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0 AND revision >= next_seq - 1),
+  created_at bigint NOT NULL CHECK (created_at >= 0),
+  updated_at bigint NOT NULL CHECK (updated_at >= created_at),
+  PRIMARY KEY (organization_id, agent_id, generation),
+  FOREIGN KEY (organization_id, agent_id) REFERENCES uap.agents(organization_id, id) ON DELETE RESTRICT
+);
+CREATE TABLE uap.message_rows (
+  organization_id text NOT NULL,
+  agent_id text NOT NULL,
+  generation bigint NOT NULL,
+  seq bigint NOT NULL CHECK (seq >= 1),
+  updated_revision bigint NOT NULL CHECK (updated_revision >= 1),
+  kind text NOT NULL CHECK (kind IN ('message', 'activity', 'card', 'event')),
+  body jsonb NOT NULL CHECK (jsonb_typeof(body) = 'object'),
+  created_at bigint NOT NULL CHECK (created_at >= 0),
+  idempotency_key text CHECK (length(idempotency_key) BETWEEN 1 AND 200),
+  idempotency_digest text CHECK (idempotency_digest ~ '^[a-f0-9]{64}$'),
+  CHECK ((idempotency_key IS NULL) = (idempotency_digest IS NULL)),
+  PRIMARY KEY (organization_id, agent_id, generation, seq),
+  UNIQUE (organization_id, agent_id, generation, idempotency_key),
+  FOREIGN KEY (organization_id, agent_id, generation) REFERENCES uap.conversations(organization_id, agent_id, generation) ON DELETE RESTRICT
+);
+CREATE INDEX message_rows_revisions ON uap.message_rows(organization_id, agent_id, generation, updated_revision, seq);
+CREATE TABLE uap.llm_items (
+  organization_id text NOT NULL,
+  agent_id text NOT NULL,
+  generation bigint NOT NULL,
+  idx bigint NOT NULL CHECK (idx >= 0),
+  item jsonb NOT NULL CHECK (jsonb_typeof(item) = 'object'),
+  PRIMARY KEY (organization_id, agent_id, generation, idx),
+  FOREIGN KEY (organization_id, agent_id, generation) REFERENCES uap.conversations(organization_id, agent_id, generation) ON DELETE RESTRICT
+);
+
+ALTER TABLE uap.conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE uap.conversations FORCE ROW LEVEL SECURITY;
+ALTER TABLE uap.message_rows ENABLE ROW LEVEL SECURITY;
+ALTER TABLE uap.message_rows FORCE ROW LEVEL SECURITY;
+ALTER TABLE uap.llm_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE uap.llm_items FORCE ROW LEVEL SECURITY;
+CREATE POLICY conversations_member_read ON uap.conversations FOR SELECT USING (
+  uap.has_org_role(organization_id, ARRAY['owner','admin','member','viewer'])
+);
+CREATE POLICY conversations_writer ON uap.conversations FOR ALL USING (
+  uap.has_org_role(organization_id, ARRAY['owner','admin','member'])
+) WITH CHECK (
+  uap.has_org_role(organization_id, ARRAY['owner','admin','member'])
+);
+CREATE POLICY message_rows_member_read ON uap.message_rows FOR SELECT USING (
+  uap.has_org_role(organization_id, ARRAY['owner','admin','member','viewer'])
+);
+CREATE POLICY message_rows_writer ON uap.message_rows FOR ALL USING (
+  uap.has_org_role(organization_id, ARRAY['owner','admin','member'])
+) WITH CHECK (
+  uap.has_org_role(organization_id, ARRAY['owner','admin','member'])
+);
+CREATE POLICY llm_items_member_read ON uap.llm_items FOR SELECT USING (
+  uap.has_org_role(organization_id, ARRAY['owner','admin','member','viewer'])
+);
+CREATE POLICY llm_items_writer ON uap.llm_items FOR ALL USING (
+  uap.has_org_role(organization_id, ARRAY['owner','admin','member'])
+) WITH CHECK (
+  uap.has_org_role(organization_id, ARRAY['owner','admin','member'])
+);
+REVOKE ALL ON uap.conversations,uap.message_rows,uap.llm_items FROM PUBLIC;
+`,
+}, SESSION_MIGRATION, HISTORY_IMPORT_MIGRATION];

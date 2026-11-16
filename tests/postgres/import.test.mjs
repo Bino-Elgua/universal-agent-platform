@@ -90,3 +90,13 @@ test('tenant-scoped stable workspace and agent IDs do not collide across importe
   const rows = (await admin.query('SELECT organization_id,id FROM uap.agents WHERE id=$1', [stable])).rows;
   assert.equal(rows.length, 2);
 });
+
+
+test('foundation receipt and profile verification use exact JSONB numeric equality',async()=>{
+  const source=createImportSource(dir,'numeric-profile');await importSqliteFoundation(admin,{...source.options,apply:true});
+  await admin.query("UPDATE uap.agents SET profile=jsonb_set(profile,'{voice_speed}','1.10000000000000000000001'::jsonb) WHERE organization_id=$1",[source.options.organizationId]);
+  await assert.rejects(importSqliteFoundation(admin,{...source.options,apply:true}),/records have changed/);
+  const counts=createImportSource(dir,'numeric-counts');await importSqliteFoundation(admin,{...counts.options,apply:true});
+  await admin.query("UPDATE uap.import_receipts SET counts=jsonb_set(counts,'{agents}','1.00000000000000000000001'::jsonb) WHERE organization_id=$1",[counts.options.organizationId]);
+  await assert.rejects(importSqliteFoundation(admin,{...counts.options,apply:true}),/receipt does not match/);
+});

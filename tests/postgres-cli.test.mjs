@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { test } from 'node:test';
 import { createImportSource } from './helpers/import-source.mjs';
+import { createHistorySource } from './helpers/history-source.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 async function cli(args, extra = {}) {
@@ -50,4 +51,23 @@ test('operator CLI requires explicit administrator access and redacts connection
   assert.equal(rejected.stderr.includes('must-not-appear'), false);
   assert.equal(rejected.stderr.includes('postgres://'), false);
   assert.match(rejected.stderr, /no connection details are printed/);
+});
+
+
+test('history staging CLI dry run returns counts without database access or transcript bodies', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'uap-cli-history-'));
+  try {
+    const { sourcePath, options } = createHistorySource(dir, 'cli');
+    const result = await cli(['stage-history', '--source', sourcePath,
+      '--org-id', options.organizationId, '--org-slug', options.organizationSlug, '--org-name', options.organizationName,
+      '--workspace-id', options.workspaceId, '--workspace-name', options.workspaceName]);
+    assert.equal(result.code, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.status, 'dry_run');
+    assert.equal(report.runtimeState, 'inactive_history_only');
+    assert.equal(report.counts.rows, 4);
+    assert.equal(report.counts.historyItems, 2);
+    assert.equal(result.stdout.includes('Historical user message'), false);
+    assert.equal(result.stdout.includes('NEVER-IMPORT-SESSION'), false);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

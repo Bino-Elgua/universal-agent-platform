@@ -18,16 +18,18 @@ beforeEach(async () => {
 });
 after(async () => { await application.end(); await admin.end(); });
 
-const coreTables = ['users', 'organizations', 'memberships', 'workspaces', 'agents', 'import_receipts'];
+const migrationIds = POSTGRES_MIGRATIONS.map(migration => migration.id);
+const currentVersion = migrationIds.at(-1);
+const coreTables = ['users', 'organizations', 'memberships', 'workspaces', 'agents', 'import_receipts', 'conversations', 'message_rows', 'llm_items'];
 
 test('fresh migration creates a forced-RLS schema and repeat application preserves its ledger', async () => {
   assert.deepEqual(await migrationStatus(admin), []);
-  assert.deepEqual(await migratePostgres(admin), { applied: [1], currentVersion: 1 });
+  assert.deepEqual(await migratePostgres(admin), { applied: migrationIds, currentVersion });
   const first = await migrationStatus(admin);
-  assert.equal(first.length, 1);
+  assert.equal(first.length, migrationIds.length);
   assert.match(first[0].checksum, /^[a-f0-9]{64}$/);
   assert.equal(first[0].name, POSTGRES_MIGRATIONS[0].name);
-  assert.deepEqual(await migratePostgres(admin), { applied: [], currentVersion: 1 });
+  assert.deepEqual(await migratePostgres(admin), { applied: [], currentVersion });
   assert.deepEqual(await migrationStatus(admin), first);
   const tables = await admin.query(`SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class c
     JOIN pg_namespace n ON c.relnamespace=n.oid WHERE n.nspname='uap' AND relname = ANY($1::text[]) ORDER BY relname`, [coreTables]);
@@ -43,7 +45,7 @@ test('changed checksums and unknown or missing migration history stop without mo
   await assert.rejects(migratePostgres(admin), PostgresMigrationError);
   assert.equal((await admin.query("SELECT count(*)::int AS n FROM uap.users WHERE id='stable-user'")).rows[0].n, 1);
   await admin.query('UPDATE uap.schema_migrations SET checksum=$1 WHERE id=1', [original.checksum]);
-  await admin.query('UPDATE uap.schema_migrations SET id=3 WHERE id=1');
+  await admin.query('UPDATE uap.schema_migrations SET id=$1 WHERE id=1', [currentVersion + 10]);
   await assert.rejects(migratePostgres(admin), /history is missing, unknown/);
   await admin.query('DELETE FROM uap.schema_migrations');
   await assert.rejects(migratePostgres(admin), /unversioned uap schema/);
@@ -51,13 +53,13 @@ test('changed checksums and unknown or missing migration history stop without mo
 });
 
 test('a failed pending batch rolls back schema, earlier migrations and ledger together', async () => {
-  const transactionEscape = { id: 2, name: 'escape_fixture', sql: 'COMMIT; CREATE TABLE uap.partial_fixture(id text);' };
+  const transactionEscape = { id: currentVersion + 1, name: 'escape_fixture', sql: 'COMMIT; CREATE TABLE uap.partial_fixture(id text);' };
   await assert.rejects(migratePostgres(admin, [...POSTGRES_MIGRATIONS, transactionEscape]), /cannot control transactions/);
   assert.equal((await admin.query("SELECT to_regnamespace('uap') IS NULL AS absent")).rows[0].absent, true);
-  const broken = { id: 2, name: 'intentional_failure_fixture', sql: 'CREATE TABLE uap.partial_fixture(id text); SELECT missing_fixture_function();' };
+  const broken = { id: currentVersion + 1, name: 'intentional_failure_fixture', sql: 'CREATE TABLE uap.partial_fixture(id text); SELECT missing_fixture_function();' };
   await assert.rejects(migratePostgres(admin, [...POSTGRES_MIGRATIONS, broken]), /missing_fixture_function/);
   assert.equal((await admin.query("SELECT to_regnamespace('uap') IS NULL AS absent")).rows[0].absent, true);
-  assert.deepEqual(await migratePostgres(admin), { applied: [1], currentVersion: 1 });
+  assert.deepEqual(await migratePostgres(admin), { applied: migrationIds, currentVersion });
   const before = await migrationStatus(admin);
   await assert.rejects(migratePostgres(admin, [...POSTGRES_MIGRATIONS, broken]), /missing_fixture_function/);
   assert.deepEqual(await migrationStatus(admin), before);
@@ -66,9 +68,9 @@ test('a failed pending batch rolls back schema, earlier migrations and ledger to
 
 test('concurrent migration runners serialize and apply each migration exactly once', async () => {
   const runs = await Promise.all([migratePostgres(admin), migratePostgres(admin), migratePostgres(admin)]);
-  assert.equal(runs.filter(run => run.applied.length === 1).length, 1);
-  assert.equal(runs.every(run => run.currentVersion === 1), true);
-  assert.equal((await migrationStatus(admin)).length, 1);
+  assert.equal(runs.filter(run => run.applied.length === migrationIds.length).length, 1);
+  assert.equal(runs.every(run => run.currentVersion === currentVersion), true);
+  assert.equal((await migrationStatus(admin)).length, migrationIds.length);
 });
 
 test('application grants exclude migration, identity, membership and provenance writes', async () => {
@@ -80,6 +82,9 @@ test('application grants exclude migration, identity, membership and provenance 
   await assert.rejects(application.query("INSERT INTO uap.users VALUES ('forbidden','x@example.test','Forbidden',1)"), { code: '42501' });
   await assert.rejects(application.query("DELETE FROM uap.memberships"), { code: '42501' });
   await assert.rejects(application.query('TRUNCATE uap.agents'), { code: '42501' });
+  await assert.rejects(application.query('DELETE FROM uap.conversations'), { code: '42501' });
+  await assert.rejects(application.query('DELETE FROM uap.message_rows'), { code: '42501' });
+  await assert.rejects(application.query('UPDATE uap.llm_items SET item=item'), { code: '42501' });
   await assert.rejects(application.query("CREATE TABLE uap.forbidden(id text)"), { code: '42501' });
   assert.deepEqual((await application.query('SELECT * FROM uap.agents')).rows, []);
   const migrator = (await admin.query('SELECT current_user AS name')).rows[0].name;
@@ -117,5 +122,25 @@ test('a blocked migration lock times out without leaving a schema or an unusable
     await holder.query('ROLLBACK');
     holder.release();
   }
-  assert.deepEqual(await migratePostgres(admin), { applied: [1], currentVersion: 1 });
+  assert.deepEqual(await migratePostgres(admin), { applied: migrationIds, currentVersion });
+});
+
+
+test('upgrade from migration one preserves existing identities, agent metadata and applied checksums', async () => {
+  await migratePostgres(admin, POSTGRES_MIGRATIONS.slice(0, 1));
+  const initialLedger = await migrationStatus(admin);
+  await admin.query("INSERT INTO uap.users VALUES ('upgrade-user','upgrade@example.test','Upgrade owner',10)");
+  await admin.query("INSERT INTO uap.organizations VALUES ('upgrade-org','upgrade-org','Upgrade organization',10)");
+  await admin.query("INSERT INTO uap.memberships VALUES ('upgrade-org','upgrade-user','owner','active',10)");
+  await admin.query("INSERT INTO uap.workspaces VALUES ('upgrade-space','upgrade-org','Upgrade workspace',11)");
+  await admin.query(`INSERT INTO uap.agents(id,organization_id,workspace_id,owner_user_id,name,profile,created_at,updated_at)
+    VALUES ('upgrade-agent','upgrade-org','upgrade-space','upgrade-user','Original agent','{"instructions":"Retain metadata"}',12,12)`);
+  const oldUser = (await admin.query('SELECT * FROM uap.users')).rows;
+  const oldAgent = (await admin.query('SELECT * FROM uap.agents')).rows;
+  assert.deepEqual(await migratePostgres(admin), { applied: migrationIds.slice(1), currentVersion });
+  assert.deepEqual((await migrationStatus(admin)).slice(0, 1), initialLedger);
+  assert.deepEqual((await admin.query('SELECT * FROM uap.users')).rows, oldUser);
+  assert.deepEqual((await admin.query('SELECT * FROM uap.agents')).rows, oldAgent);
+  assert.equal((await admin.query('SELECT count(*)::int AS count FROM uap.conversations')).rows[0].count, 0);
+  assert.deepEqual(await migratePostgres(admin), { applied: [], currentVersion });
 });

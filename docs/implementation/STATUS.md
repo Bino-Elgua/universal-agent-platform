@@ -8,7 +8,7 @@ Specification: [Master Blueprint v2](master-blueprint-v2.md). This checkout is a
 | --- | --- | --- |
 | WP-01 | Exact Bot HQ baseline, clean installation, build/typecheck, lockfile license metadata inventory; six candidate source checkouts statically inspected and pinned | Live upstream provider E2Es, complete dependency/model/asset rights review, missing OKF source and custom Agency fork |
 | WP-02 | Original geometric badges for all 25 persisted shape IDs, activity states/reduced motion, neutral theme/favicon/package identifiers, licensed Lucide glyphs; excluded artwork removed; browser preference compatibility | Final commercial brand/domain and rights clearance; avatar uploads/moderation not implemented |
-| WP-03 | Single-owner safeguards; six checksummed transactional SQLite migrations; PostgreSQL tenant metadata schema, async workspace/agent repository, FORCE RLS, role restrictions, safe read-only inspection and idempotent metadata staging | PostgreSQL sessions/history/jobs/runtime repositories and API cutover, full account export/import, restore rehearsal, durable orchestration and tenant-isolated runtimes |
+| WP-03 | Single-owner safeguards; six checksummed transactional SQLite migrations; PostgreSQL metadata/session/conversation repositories, FORCE RLS, separated issuer credentials, authenticated read-API tests, safe source inspection and idempotent metadata/history staging | Durable jobs/runtime repositories, auth-provider integration and full API cutover, complete account export/import, restore rehearsal and tenant-isolated runtimes |
 | WP-04 | Optional credential boot, lazy clients, pre-I/O configuration guards, truthful health configuration states, disabled-provider tool/UI gating, real voice catalog error/retry, no fabricated options | Full versioned registry/conformance, per-tenant encrypted credentials, capability probes, budget/entitlement grants and live provider testing |
 | WP-05 | Sticky external-primary binding, protected primary files/process, managed path/process ownership checks, opt-in credential inheritance; gateway-only default model reporting | Authorized remote pairing/tunnel, revocation, managed hosting, live Hermes acceptance, supported authorized gateway model mutation |
 
@@ -57,8 +57,8 @@ Original node badges, Lucide glyphs and a neutral palette replace excluded artwo
 ## Validation
 
 - `npm run typecheck`: passed.
-- `npm test`: **50 passed**, 0 failed (the original 29 plus storage migration, source/CLI and test-harness cases). Includes real isolated SQLite/API/startup tests and clearly identified unit-only SDK/local gateway fixtures. No live provider credentials were used.
-- `npm run test:postgres`: **24 passed**, 0 failed, against actual PostgreSQL 16.16. Each test file uses a separate temporary database and nonprivileged login; generated roles/databases and the disposable container were removed. Image ID `sha256:3cbd775daa28461ef484ed88ca1e5a5a72ff126e196deeebce6fec764edf1200`; pinned registry digest and operator instructions are in the storage guide.
+- `npm test`: **54 passed**, 0 failed (the original 29 plus storage migration, source/CLI and test-harness cases). Includes real isolated SQLite/API/startup tests and clearly identified unit-only SDK/local gateway fixtures. No live provider credentials were used.
+- `npm run test:postgres`: **54 passed**, 0 failed, against actual PostgreSQL 16.16. Each test file uses a separate temporary database and nonprivileged login; generated roles/databases and the disposable container were removed. Image ID `sha256:3cbd775daa28461ef484ed88ca1e5a5a72ff126e196deeebce6fec764edf1200`; pinned registry digest and operator instructions are in the storage guide.
 - `npm run build`: passed for web and server.
 - `npm run audit:branding`: passed; excludes 69 upstream artifact hashes from source/public/build paths. This is distribution hygiene, not trademark/legal clearance.
 - `npm run test:browser`: actual Chromium against the compiled local server, real HTTP/session/SQLite and original UI, with temporary data. Covers owner link login, provider gating, read-only Hermes display, primary protection, identity after reload, missing assets/runtime errors and a 390px viewport.
@@ -72,7 +72,7 @@ Not run: original `tests/e2e.mjs` / `tests/voice-call.mjs` against real Hermes/O
 
 ## Next implementation dependencies
 
-1. Continue async PostgreSQL repositories for sessions, conversation history, tasks/approvals and runtime records, then authenticated API cutover. Direct database/repository two-tenant denial is tested; public multi-tenant API denial and complete account-data import/restore remain pending.
+1. Continue PostgreSQL tasks/approvals/jobs and runtime records, then auth-provider integration and complete API cutover. Session-authenticated HTTP read isolation and direct database denial are tested; the legacy UI/API, full write path and runtime authority remain on SQLite.
 2. Implement scoped provider connections, registry contracts and worker-boundary policy/budget enforcement; replace shared-runtime authority before enabling hosted accounts.
 3. Implement and verify authorized Hermes pairing against the pinned real runtime, then complete computer/voice/connector conformance.
 4. Continue the audited SID/role/security/media/lab adapters in the blueprint's order. Parallax demo credit/mock/alternate-reasoning paths must not be copied into production; Cloud Attack Range needs durable expiry/verified teardown, not only expiration metadata.
@@ -88,3 +88,13 @@ The CLI can migrate/status/grant an existing restricted application role, inspec
 Review fixes include effective pg URL target validation (query parameters cannot override a loopback host or generated test database), WAL source rejection, inherited CREATEDB rejection, and migration transaction-control lint with PostgreSQL dollar-quote/Unicode/comment handling. Migration SQL remains trusted source code; lint is not an untrusted-SQL sandbox.
 
 The pinned PostgreSQL test job has been added to CI and its YAML parsed locally. No hosted CI, production database migration, application storage cutover, cloud provisioning or customer resource action is claimed.
+
+## Sessions and history continuation — 2026-11-16
+
+Four append-only PostgreSQL migrations now cover metadata, conversation rows/model context, opaque hashed sessions and distinct history-stage receipts. Generation/sequence/revision locking, request idempotency, cursor paging, legacy transcript kinds and transactional rollback are implemented and tested. Earlier metadata migration bytes remain unchanged.
+
+A separate issuer login can create/revoke sessions without metadata privileges. The application login has no session-table rights and uses fixed SECURITY DEFINER lookup/logout functions. Tokens do not grant organization authority; active membership remains required. The read-only API factory passed actual HTTP→token lookup→RLS→data→response tests. It remains unmounted in the default server, has no issuance/write/execution endpoint, and is not a hosted API release.
+
+The `stage-history` operator command now preserves historical/current generations and LLM indices from a verified offline source, requires the matching foundation import, and records distinct receipts/unmapped counts. Historical approval cards never become grants; active sessions, turns, runtime and provider credentials remain excluded. Exact JSONB comparisons detect numeric tampering hidden by JavaScript rounding. Source/target byte limits account for PostgreSQL canonical formatting.
+
+Validation for this continuation: 54 local tests, 54 real-PostgreSQL tests, TypeScript checks, production build and branding audit passed. Actual PostgreSQL HTTP tests include expired/revoked tokens, suspended membership, foreign-tenant IDs, separate issuer access and privilege drift; source tests cover ambiguity and WAL immutability. Disposable database/role/container cleanup completed. Migration review caught and corrected a legacy-kind constraint mismatch and response page sizing before recording these results. No real auth provider, managed tenant runtime, merchant or production deployment was used.

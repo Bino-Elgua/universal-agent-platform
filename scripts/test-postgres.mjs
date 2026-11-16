@@ -18,7 +18,7 @@ for (const name of ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_V
 let currentChild;
 let container;
 let admin;
-const report = { status: 'running', server: null, image: null, files: [], limitations: 'Metadata repository and staging import tests; the running UI/API still uses SQLite. No hosted runtime isolation or full data cutover is claimed.' };
+const report = { status: 'running', server: null, image: null, files: [], limitations: 'Real identity, conversation, HTTP read-API and staging tests; the default UI/API still uses SQLite. No hosted runtime isolation or full cutover is claimed.' };
 
 async function command(binary, args, env = process.env, stream = false) {
   const child = spawn(binary, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'], timeout: args.includes('--test') ? 180000 : 120000 });
@@ -68,20 +68,27 @@ try {
     const id = suffix();
     const dbName = `uap_test_${id}`;
     const appRole = `uap_app_${id}`;
+    const issuerRole = `uap_issuer_${id}`;
     const password = crypto.randomBytes(24).toString('hex');
+    const issuerPassword = crypto.randomBytes(24).toString('hex');
     let createdDatabase = false;
     let createdRole = false;
+    let createdIssuer = false;
     try {
       await admin.query(`CREATE ROLE ${quote(appRole)} LOGIN PASSWORD ${literal(password)} NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION`);
       createdRole = true;
+      await admin.query(`CREATE ROLE ${quote(issuerRole)} LOGIN PASSWORD ${literal(issuerPassword)} NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION`);
+      createdIssuer = true;
       await admin.query(`CREATE DATABASE ${quote(dbName)}`);
       createdDatabase = true;
       const databaseUrl = new URL(adminUrl); databaseUrl.pathname = `/${dbName}`;
       const appUrl = new URL(databaseUrl); appUrl.username = appRole; appUrl.password = password;
       localPostgresTestTarget(databaseUrl, { database: dbName });
       localPostgresTestTarget(appUrl, { database: dbName, user: appRole });
+      const issuerUrl = new URL(appUrl); issuerUrl.username = issuerRole; issuerUrl.password = issuerPassword;
+      localPostgresTestTarget(issuerUrl, { database: dbName, user: issuerRole });
       const result = await command(process.execPath, ['--import', 'tsx', '--test', '--test-reporter=spec', `tests/postgres/${file}`], {
-        ...process.env, UAP_POSTGRES_TEST_DATABASE: '1', TEST_DATABASE_URL: databaseUrl.toString(), TEST_APP_DATABASE_URL: appUrl.toString(),
+        ...process.env, UAP_POSTGRES_TEST_DATABASE: '1', TEST_DATABASE_URL: databaseUrl.toString(), TEST_APP_DATABASE_URL: appUrl.toString(), TEST_ISSUER_DATABASE_URL: issuerUrl.toString(),
       }, true);
       report.files.push({ file, exitCode: result.code });
       await writeFile(path.join(output, `${file}.log`), result.output);
@@ -89,6 +96,7 @@ try {
     } finally {
       if (createdDatabase) await admin.query(`DROP DATABASE ${quote(dbName)} WITH (FORCE)`);
       if (createdRole) await admin.query(`DROP ROLE ${quote(appRole)}`);
+      if (createdIssuer) await admin.query(`DROP ROLE ${quote(issuerRole)}`);
     }
   }
   report.status = process.exitCode ? 'failed' : 'passed';

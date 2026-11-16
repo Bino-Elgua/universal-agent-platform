@@ -40,7 +40,12 @@ export async function assertApplicationRole(client: PoolClient): Promise<void> {
             OR has_table_privilege(candidate.oid,'uap.memberships','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
             OR has_table_privilege(candidate.oid,'uap.import_receipts','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
             OR has_table_privilege(candidate.oid,'uap.workspaces','TRUNCATE,REFERENCES,TRIGGER')
-            OR has_table_privilege(candidate.oid,'uap.agents','TRUNCATE,REFERENCES,TRIGGER'))
+            OR has_table_privilege(candidate.oid,'uap.agents','TRUNCATE,REFERENCES,TRIGGER')
+            OR has_table_privilege(candidate.oid,'uap.conversations','DELETE,TRUNCATE,REFERENCES,TRIGGER')
+            OR has_table_privilege(candidate.oid,'uap.message_rows','DELETE,TRUNCATE,REFERENCES,TRIGGER')
+            OR has_table_privilege(candidate.oid,'uap.llm_items','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+            OR has_table_privilege(candidate.oid,'uap.auth_sessions','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+            OR has_table_privilege(candidate.oid,'uap.history_import_receipts','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
       )
       OR EXISTS (SELECT 1 FROM pg_database d WHERE d.datname=current_database() AND pg_has_role(current_user,d.datdba,'MEMBER'))
       OR has_schema_privilege(current_user, 'uap', 'CREATE')
@@ -54,25 +59,32 @@ export async function assertApplicationRole(client: PoolClient): Promise<void> {
   if (result.rows.length !== 1 || result.rows[0].unsafe !== false) throw new UnsafeDatabaseRoleError();
 }
 
-/**
- * The authenticated server supplies actorId; caller-supplied object IDs never establish scope.
- * Settings are local to one transaction and cleared before a pooled connection is reused.
- */
+/** Authentication uses a blank context until a valid opaque token resolves the actor. */
+export async function withIdentity<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
+  return withContext(pool, null, work);
+}
+
+/** Scope comes from authenticated server identity, never from an object ID alone. */
 export async function withTenant<T>(pool: Pool, scope: TenantScope, work: (client: PoolClient) => Promise<T>): Promise<T> {
   validateScope(scope);
+  return withContext(pool, scope, work);
+}
+
+async function withContext<T>(pool: Pool, scope: TenantScope | null, work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   let discard = false;
   let transaction = false;
   try {
-    // Clear ambient context as well as transaction-local values (including after caller errors).
     await client.query("SELECT set_config('uap.actor_id','',false), set_config('uap.organization_id','',false)");
     await client.query('BEGIN');
     transaction = true;
     await client.query("SET LOCAL statement_timeout='5s'; SET LOCAL lock_timeout='3s'; SET LOCAL idle_in_transaction_session_timeout='10s'; SET LOCAL search_path=pg_catalog,uap");
     await assertApplicationRole(client);
-    await client.query("SELECT set_config('uap.actor_id',$1,true), set_config('uap.organization_id',$2,true)", [scope.actorId, scope.organizationId]);
-    const membership = await client.query('SELECT role FROM uap.memberships WHERE organization_id=$1 AND user_id=$2 AND state=$3', [scope.organizationId, scope.actorId, 'active']);
-    if (membership.rows.length !== 1) throw new TenantAccessError();
+    if (scope) {
+      await client.query("SELECT set_config('uap.actor_id',$1,true), set_config('uap.organization_id',$2,true)", [scope.actorId, scope.organizationId]);
+      const membership = await client.query('SELECT role FROM uap.memberships WHERE organization_id=$1 AND user_id=$2 AND state=$3', [scope.organizationId, scope.actorId, 'active']);
+      if (membership.rows.length !== 1) throw new TenantAccessError();
+    }
     const result = await work(client);
     await client.query('COMMIT');
     transaction = false;
@@ -80,7 +92,6 @@ export async function withTenant<T>(pool: Pool, scope: TenantScope, work: (clien
   } catch (error) {
     if (transaction) {
       try { await client.query('ROLLBACK'); } catch { discard = true; }
-      transaction = false;
     }
     if (error && typeof error === 'object' && 'code' in error && error.code === '42501') throw new TenantAccessError();
     throw error;
