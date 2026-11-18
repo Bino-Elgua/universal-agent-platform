@@ -4,7 +4,7 @@ An implementation of the [Master Blueprint v2](docs/implementation/master-bluepr
 
 This checkout currently supports the upstream **single-owner self-hosted architecture**. It shares the owner's computer and operating-system identity; agent screens are not security sandboxes. Hosted multi-tenant operation remains blocked until the data, credential and runtime isolation gates pass.
 
-The [storage operator guide](docs/implementation/storage-foundation.md) documents versioned SQLite upgrades, PostgreSQL sessions/conversations, durable task/approval transitions with separate worker credentials, and the staged import tools. PostgreSQL has not replaced the running application database or agent queue.
+The [storage operator guide](docs/implementation/storage-foundation.md) documents versioned SQLite upgrades, PostgreSQL sessions/conversations, durable task/approval transitions, the fail-closed single-action executor contract, separate worker credentials, and staged import tools. PostgreSQL and that executor library have not replaced the running application database or agent queue.
 
 See [implementation evidence](docs/implementation/STATUS.md), [tenant audit](docs/implementation/tenant-audit.md), and [candidate source review](docs/implementation/source-inventory.md) for what has actually been inspected and tested.
 

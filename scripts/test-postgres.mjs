@@ -26,7 +26,7 @@ for (const name of ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_V
 let currentChild;
 let container;
 let admin;
-const report = { status: 'running', server: null, image: null, files: [], limitations: 'Real identity, conversation, durable job/approval transitions, HTTP read-API and staging tests; the default UI/API still uses SQLite. No external job executor, hosted runtime isolation or full cutover is claimed.' };
+const report = { status: 'running', server: null, image: null, files: [], limitations: 'Real identity, conversation, durable job/approval/executor-boundary transitions, HTTP read-API and staging tests; the default UI/API still uses SQLite. No deployed external worker, production policy service, hosted runtime isolation or full cutover is claimed.' };
 
 async function command(binary, args, env = process.env, stream = false) {
   const child = spawn(binary, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'], timeout: args.includes('--test') ? 180000 : 120000 });

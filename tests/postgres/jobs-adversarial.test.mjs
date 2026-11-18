@@ -131,6 +131,22 @@ test('requester suspension or demotion prevents queued dispatch', async () => {
   }
 });
 
+test('requester suspension after claim blocks the next worker tool-boundary checkpoint', async () => {
+  const entry = await enqueue('checkpoint_membership');
+  const claimed = await claim(entry);
+  const expiresAt = claimed.job.leaseExpiresAt;
+  try {
+    await admin.query("UPDATE uap.memberships SET state='suspended' WHERE organization_id=$1 AND user_id=$2", [org, requester]);
+    await assert.rejects(worker.heartbeat({ ...lease(claimed), leaseMs: 120000 }), JobConflictError);
+    const stored = await admin.query('SELECT lease_expires_at,heartbeat_at,state FROM uap.task_jobs WHERE organization_id=$1 AND id=$2', [org, entry.job.id]);
+    assert.equal(Number(stored.rows[0].lease_expires_at), expiresAt);
+    assert.equal(stored.rows[0].state, 'running');
+  } finally {
+    await admin.query("UPDATE uap.memberships SET state='active' WHERE organization_id=$1 AND user_id=$2", [org, requester]);
+  }
+  await worker.settle({ ...lease(claimed), outcome: 'incomplete', error: { code: 'authorization_revoked_before_action' } });
+});
+
 test('requester and approver membership must still authorize consumption after human approval', async () => {
   for (const [actor, change, restoredRole] of [
     [requester, "state='suspended'", 'member'], [requester, "role='viewer'", 'member'],
