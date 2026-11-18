@@ -29,10 +29,14 @@ The `uap` schema has a separate checksummed migration ledger and these metadata 
 | llm_items | Ordered agent/generation model context; application insert/read only |
 | auth_sessions | Global user identity, token hashes only; no direct application table access |
 | history_import_receipts | Separate history-stage provenance; application read only |
+| tasks / task_jobs | Tenant work and immutable dispatch input; application reads and narrow transitions |
+| agent_runs | Durable execution attempts and lease generations; worker transitions only |
+| approvals | Exact-action request, human decision, expiry, revocation and one-time consumption; viewers excluded |
+| job_events | Ordered, causal transition records; no application/worker direct writes |
 
 Composite foreign keys reject cross-organization workspace and agent-owner links. The application login has no user, organization, membership, migration or provenance write privilege. Enrollment and membership administration are not implemented as public APIs yet. Agents are metadata records; no provider/runtime starts from these repositories.
 
-All eleven data tables have ENABLE and FORCE ROW LEVEL SECURITY; session access uses narrow identity functions and separate issuer policies rather than organization context. The active actor and organization are set locally to one transaction, membership is checked, and context is cleared before releasing the connection, including after rollback. Repository queries also scope their object lookups explicitly. Viewer and suspended-member restrictions are checked by both the repository and database policies.
+All sixteen data tables have ENABLE and FORCE ROW LEVEL SECURITY; session access uses narrow identity functions and separate issuer policies rather than organization context. The active actor and organization are set locally to one transaction, membership is checked, and context is cleared before releasing the connection, including after rollback. Repository queries also scope their object lookups explicitly. Viewer and suspended-member restrictions are checked by both the repository and database policies.
 
 The actor ID is supplied by a trusted authenticated server, not by arbitrary client object IDs. The default application HTTP authentication has not been switched to PostgreSQL; the new read-only factory uses its own opaque bearer sessions in isolated HTTP tests. Database application credentials are server credentials; tenant session context is not a replacement for authenticated request handling.
 
@@ -53,6 +57,7 @@ npm run db:postgres -- migrate
 npm run db:postgres -- status
 npm run db:postgres -- grant-app-role --role platform_app
 npm run db:postgres -- grant-session-issuer --role platform_session_issuer
+npm run db:postgres -- grant-job-worker --role platform_job_worker
 ```
 
 The migration runner serializes pending batches with an advisory transaction lock, uses bounded lock/statement timeouts, checks contiguous history/checksums, and commits the whole pending batch together. Unknown, missing or changed ledger entries stop it. A nonempty unversioned `uap` schema requires explicit review rather than automatic adoption. `status` reports applied entries; `migrate` validates them.
@@ -112,6 +117,26 @@ History staging preserves observed generations, the configured current generatio
 
 One transaction stages all history and a distinct receipt. Existing sessions, pending turns, active approvals, provider grants and runtime state remain excluded/unmapped. A historical approval card is data, not an active authorization. Repeat imports verify actual records and exact JSONB receipt/profile values, including numeric changes below JavaScript parser precision. JSONB spacing expansion is allowed without relaxing source limits. Partial target histories are never silently merged. The original source and remaining unmapped data are still required; this is not a complete account cutover.
 
+## Durable tasks, leases and approvals
+
+Migrations 5 and 6 add task/job/run/approval/event records and narrow database transition functions. Migrations 1–4 retain their original bytes. `TenantJobRepository` can enqueue, read bounded pages, request cancellation and record human approval decisions. A tenant request requires an active membership; cancellation and approval resolution require an owner/admin or the task's member creator. Enqueue compares a versioned digest of the authenticated actor and immutable request fields under a scoped lock. Repeated identical requests return the original task/job; conflicting requests fail.
+
+`WorkerJobRepository` requires a separate direct `NOINHERIT` login provisioned with `grant-job-worker`. It receives only schema usage and the five worker transition functions, with no direct table access or tenant/session functions. Both service paths check privilege drift on every operation. Application credentials cannot claim a job, update a lease or forge an approval/event by directly writing a table. The worker is a trusted cross-tenant dispatcher credential: never distribute it to a model, customer, tool process or sandbox.
+
+Claims use row locks with `SKIP LOCKED`, per-agent coordination and an active-job uniqueness constraint. PostgreSQL supplies lease times; each claim increments a fencing generation and creates a distinct run. Only a SHA-256 hash of a random 256-bit lease token is stored. Heartbeat, settlement and approval operations require the current unexpired generation/token. Transactions end before any external work. Approval pauses close a run and release its lease; resuming an allowed approval receives a new fence without consuming a retry attempt.
+
+Lease recovery and explicit retries are bounded by `maxAttempts`. `reconcile_only` work and jobs that have consumed an approval become `incomplete` when recovery might repeat a side effect. Other explicitly idempotent jobs can retry, with caller-specified delay on reported failure; exhaustion becomes `dead_letter`. There is no automatic dead-letter replay or claim of provider reconciliation. Queued cancellation completes immediately; running cancellation stays `cancelling` until a worker confirms stop or reports `incomplete`. Expired cancellation leases require reconciliation.
+
+Approvals bind a versioned digest to organization/job, exact action kind/arguments and policy/budget references. Pending and allowed approvals expire using the database clock, and allowed decisions can be revoked. Consumption checks the current lease, exact digest, current requester/approver membership and recorded policy/budget references, then records the consuming run atomically. Consumption is one-time. A digest is request comparison, not a signature, SID proof, policy-engine decision or verified funding reservation. Payloads must not contain credentials. Historical imported approval cards remain inactive data.
+
+Events allocate a per-job sequence transactionally with state changes and carry global IDs, causal links, tenant/workspace/agent, trace and provenance. Application/worker roles cannot mutate them directly. These are database audit records, not cryptographically signed evidence or a durable delivery outbox. The nullable requester SID is an unverified reference until the SID service exists.
+
+`reserved_paid` jobs are deliberately unclaimable: a reservation ID supplied by a caller does not establish funds. `unmetered_local` is a classification for a future trusted executor, not proof that arbitrary payloads are safe or free. No default worker process, Hermes dispatch, cron/webhook scheduler, execution endpoint or UI cutover is enabled by these repositories. Capability validation, verified handler idempotency, policy/entitlement checks, spending ledger, runtime isolation, resource reconciliation and the blueprint's orchestration service remain required before actual provider execution. The main app still uses its existing SQLite queue.
+
+Membership is rechecked at claim and approval consumption. A later membership change does not by itself stop a running external process: heartbeat/settlement maintain its record, and a future executor must revalidate authority at each tool boundary and propagate revocation to the runtime. Lease expiration fences database transitions; it does not prove an external command stopped.
+
+Upgrade staging databases with `migrate`, then reapply the application grants and provision a distinct worker login. Older application builds must not be pointed at the expanded schema without their matching grants. For rollback, restore the verified backup with its matching application version; there is no automatic destructive downgrade. Preserve unfinished jobs for explicit reconciliation and never replay them just to repair a migration.
+
 ## Verification and evidence
 
 ```sh
@@ -125,3 +150,5 @@ The ordinary suite includes SQLite legacy/upgrade, rollback, checksum/default/in
 Without a local test URL the harness starts the pinned PostgreSQL Docker image and removes its container/data at the end. With `TEST_POSTGRES_ADMIN_URL`, it accepts only a loopback target and validates pg's effective host/database/user after parsing. Connection query parameters cannot override generated test targets. It creates and removes only databases and roles with its freshly generated IDs.
 
 Results and server/image identity are written to `tests/out/postgres/report.json`; individual logs are in the same ignored directory and uploaded by CI. The new CI job is authored; a hosted run is not claimed. No paid provider, cloud lab, merchant or customer resource is part of these tests.
+
+To run a focused database regression while preserving the same isolated setup and cleanup, pass existing filenames, for example `node scripts/test-postgres.mjs jobs.test.mjs`. Application, issuer and worker roles have distinct generated passwords and are removed with each disposable test database.

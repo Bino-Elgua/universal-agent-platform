@@ -1,4 +1,5 @@
-// Each test file receives its own database and direct, unprivileged application login.
+// Each test file receives its own database plus separate direct, unprivileged
+// application, session-issuer and job-worker logins.
 // With no local TEST_POSTGRES_ADMIN_URL, start a disposable loopback-only Docker PostgreSQL.
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -10,6 +11,13 @@ import { localPostgresTestTarget } from './lib/postgres-test-target.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 const output = path.join(root, 'tests/out/postgres');
 const suffix = () => crypto.randomBytes(10).toString('hex');
+const distinctSecret = excluded => {
+  let value;
+  do value = crypto.randomBytes(24).toString('hex');
+  while (excluded.has(value));
+  excluded.add(value);
+  return value;
+};
 const quote = value => `"${value.replaceAll('"', '""')}"`;
 const literal = value => `'${value.replaceAll("'", "''")}'`;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -18,7 +26,7 @@ for (const name of ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_V
 let currentChild;
 let container;
 let admin;
-const report = { status: 'running', server: null, image: null, files: [], limitations: 'Real identity, conversation, HTTP read-API and staging tests; the default UI/API still uses SQLite. No hosted runtime isolation or full cutover is claimed.' };
+const report = { status: 'running', server: null, image: null, files: [], limitations: 'Real identity, conversation, durable job/approval transitions, HTTP read-API and staging tests; the default UI/API still uses SQLite. No external job executor, hosted runtime isolation or full cutover is claimed.' };
 
 async function command(binary, args, env = process.env, stream = false) {
   const child = spawn(binary, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'], timeout: args.includes('--test') ? 180000 : 120000 });
@@ -61,7 +69,10 @@ try {
   }
   if (!ready) throw new Error('Local PostgreSQL did not become ready within 30 seconds.');
   report.server = (await admin.query('SELECT version() AS version')).rows[0].version;
-  const files = (await readdir(path.join(root, 'tests/postgres'))).filter(file => file.endsWith('.test.mjs')).sort();
+  const availableFiles = (await readdir(path.join(root, 'tests/postgres'))).filter(file => file.endsWith('.test.mjs')).sort();
+  const requestedFiles = process.argv.slice(2);
+  if (requestedFiles.some(file => !availableFiles.includes(file))) throw new Error('Select existing PostgreSQL test filenames only.');
+  const files = requestedFiles.length ? [...new Set(requestedFiles)] : availableFiles;
   if (!files.length) throw new Error('No PostgreSQL tests found.');
   for (const file of files) {
     if (process.exitCode) break;
@@ -69,16 +80,22 @@ try {
     const dbName = `uap_test_${id}`;
     const appRole = `uap_app_${id}`;
     const issuerRole = `uap_issuer_${id}`;
-    const password = crypto.randomBytes(24).toString('hex');
-    const issuerPassword = crypto.randomBytes(24).toString('hex');
+    const workerRole = `uap_worker_${id}`;
+    const secrets = new Set();
+    const password = distinctSecret(secrets);
+    const issuerPassword = distinctSecret(secrets);
+    const workerPassword = distinctSecret(secrets);
     let createdDatabase = false;
     let createdRole = false;
     let createdIssuer = false;
+    let createdWorker = false;
     try {
       await admin.query(`CREATE ROLE ${quote(appRole)} LOGIN PASSWORD ${literal(password)} NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION`);
       createdRole = true;
       await admin.query(`CREATE ROLE ${quote(issuerRole)} LOGIN PASSWORD ${literal(issuerPassword)} NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION`);
       createdIssuer = true;
+      await admin.query(`CREATE ROLE ${quote(workerRole)} LOGIN PASSWORD ${literal(workerPassword)} NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION`);
+      createdWorker = true;
       await admin.query(`CREATE DATABASE ${quote(dbName)}`);
       createdDatabase = true;
       const databaseUrl = new URL(adminUrl); databaseUrl.pathname = `/${dbName}`;
@@ -87,16 +104,33 @@ try {
       localPostgresTestTarget(appUrl, { database: dbName, user: appRole });
       const issuerUrl = new URL(appUrl); issuerUrl.username = issuerRole; issuerUrl.password = issuerPassword;
       localPostgresTestTarget(issuerUrl, { database: dbName, user: issuerRole });
+      const workerUrl = new URL(appUrl); workerUrl.username = workerRole; workerUrl.password = workerPassword;
+      localPostgresTestTarget(workerUrl, { database: dbName, user: workerRole });
       const result = await command(process.execPath, ['--import', 'tsx', '--test', '--test-reporter=spec', `tests/postgres/${file}`], {
-        ...process.env, UAP_POSTGRES_TEST_DATABASE: '1', TEST_DATABASE_URL: databaseUrl.toString(), TEST_APP_DATABASE_URL: appUrl.toString(), TEST_ISSUER_DATABASE_URL: issuerUrl.toString(),
+        ...process.env,
+        UAP_POSTGRES_TEST_DATABASE: '1',
+        TEST_DATABASE_URL: databaseUrl.toString(),
+        TEST_APP_DATABASE_URL: appUrl.toString(),
+        TEST_ISSUER_DATABASE_URL: issuerUrl.toString(),
+        TEST_WORKER_DATABASE_URL: workerUrl.toString(),
       }, true);
       report.files.push({ file, exitCode: result.code });
       await writeFile(path.join(output, `${file}.log`), result.output);
       if (result.code !== 0) process.exitCode = 1;
     } finally {
-      if (createdDatabase) await admin.query(`DROP DATABASE ${quote(dbName)} WITH (FORCE)`);
-      if (createdRole) await admin.query(`DROP ROLE ${quote(appRole)}`);
-      if (createdIssuer) await admin.query(`DROP ROLE ${quote(issuerRole)}`);
+      let cleanupError;
+      const clean = async (created, statement) => {
+        if (!created) return;
+        try { await admin.query(statement); }
+        catch (error) { cleanupError ??= error; }
+      };
+      // Attempt every cleanup even if an earlier drop fails. Database removal
+      // comes first so policies/grants inside it cannot retain a test role.
+      await clean(createdDatabase, `DROP DATABASE ${quote(dbName)} WITH (FORCE)`);
+      await clean(createdWorker, `DROP ROLE ${quote(workerRole)}`);
+      await clean(createdIssuer, `DROP ROLE ${quote(issuerRole)}`);
+      await clean(createdRole, `DROP ROLE ${quote(appRole)}`);
+      if (cleanupError) throw cleanupError;
     }
   }
   report.status = process.exitCode ? 'failed' : 'passed';

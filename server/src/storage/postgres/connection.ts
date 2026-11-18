@@ -45,7 +45,19 @@ export async function assertApplicationRole(client: PoolClient): Promise<void> {
             OR has_table_privilege(candidate.oid,'uap.message_rows','DELETE,TRUNCATE,REFERENCES,TRIGGER')
             OR has_table_privilege(candidate.oid,'uap.llm_items','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
             OR has_table_privilege(candidate.oid,'uap.auth_sessions','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-            OR has_table_privilege(candidate.oid,'uap.history_import_receipts','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
+            OR has_table_privilege(candidate.oid,'uap.history_import_receipts','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+            OR has_table_privilege(candidate.oid,'uap.tasks','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+            OR has_table_privilege(candidate.oid,'uap.task_jobs','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+            OR has_table_privilege(candidate.oid,'uap.agent_runs','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+            OR has_table_privilege(candidate.oid,'uap.approvals','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+            OR has_table_privilege(candidate.oid,'uap.job_events','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+            OR EXISTS (
+              SELECT 1 FROM pg_proc function
+              JOIN pg_namespace namespace ON namespace.oid=function.pronamespace
+              WHERE namespace.nspname='uap'
+                AND function.proname<>ALL(ARRAY['has_org_role','authenticate_session','revoke_session','enqueue_task_job','request_task_job_cancellation','resolve_task_approval'])
+                AND has_function_privilege(candidate.oid,function.oid,'EXECUTE')
+            ))
       )
       OR EXISTS (SELECT 1 FROM pg_database d WHERE d.datname=current_database() AND pg_has_role(current_user,d.datdba,'MEMBER'))
       OR has_schema_privilege(current_user, 'uap', 'CREATE')

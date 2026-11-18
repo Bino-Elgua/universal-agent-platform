@@ -4,6 +4,7 @@ import { migratePostgres, migrationStatus, grantApplicationRole } from './migrat
 import { inspectSqliteSource, importSqliteFoundation } from './import.js';
 import { importSqliteHistory } from './history-import.js';
 import { grantSessionIssuerRole } from './session-grants.js';
+import { grantJobWorkerRole } from './job-worker-grants.js';
 
 const help = `PostgreSQL foundation operator tools (the running application still uses SQLite).
 
@@ -11,6 +12,7 @@ const help = `PostgreSQL foundation operator tools (the running application stil
   npm run db:postgres -- status
   npm run db:postgres -- grant-app-role --role <existing-login>
   npm run db:postgres -- grant-session-issuer --role <separate-issuer-login>
+  npm run db:postgres -- grant-job-worker --role <separate-worker-login>
   npm run db:postgres -- inspect-sqlite --source <backup.db>
   npm run db:postgres -- import-sqlite --source <backup.db> --org-id <id> --org-slug <slug>
       --org-name <name> --workspace-id <id> --workspace-name <name> [--apply]
@@ -41,7 +43,7 @@ async function main() {
     console.log(JSON.stringify({ mappingVersion: snapshot.mappingVersion, sourceDigest: snapshot.sourceDigest, fingerprintScope: snapshot.fingerprintScope, counts: snapshot.counts, runtimeState: 'inactive_metadata_only' }, null, 2));
     return;
   }
-  if (!['migrate', 'status', 'grant-app-role', 'grant-session-issuer', 'import-sqlite', 'stage-history'].includes(command)) throw new Error('Unknown operator command. Use --help.');
+  if (!['migrate', 'status', 'grant-app-role', 'grant-session-issuer', 'grant-job-worker', 'import-sqlite', 'stage-history'].includes(command)) throw new Error('Unknown operator command. Use --help.');
   const connectionString = process.env.UAP_POSTGRES_ADMIN_URL;
   if (!connectionString && !(['import-sqlite','stage-history'].includes(command) && !values.apply)) throw new Error('Set UAP_POSTGRES_ADMIN_URL for this operator command.');
   // A dry run never opens a connection; no environment-backed pool is created when absent.
@@ -56,6 +58,10 @@ async function main() {
     if (command === 'grant-session-issuer') {
       await grantSessionIssuerRole(pool!, required(values.role, 'role'));
       console.log(JSON.stringify({ status: 'granted', scope: 'session_issuance_only' }));
+    }
+    if (command === 'grant-job-worker') {
+      await grantJobWorkerRole(pool!, required(values.role, 'role'));
+      console.log(JSON.stringify({ status: 'granted', scope: 'durable_task_transitions_only' }));
     }
     if (command === 'import-sqlite' || command === 'stage-history') {
       const apply = command === 'stage-history' ? importSqliteHistory : importSqliteFoundation;
@@ -72,7 +78,7 @@ async function main() {
 
 main().catch(error => {
   // Never print raw PostgreSQL errors, row details, URLs, source records or credentials.
-  const safe = error instanceof Error && ['SqliteImportError', 'PostgresMigrationError', 'UnsafeSessionIssuerRoleError'].includes(error.name);
+  const safe = error instanceof Error && ['SqliteImportError', 'PostgresMigrationError', 'UnsafeSessionIssuerRoleError', 'UnsafeJobWorkerRoleError'].includes(error.name);
   console.error(safe || (error instanceof Error && /^(Required option:|Set UAP_POSTGRES_ADMIN_URL|Supply exactly|Unknown operator)/.test(error.message))
     ? error.message : 'Database operation failed. Check source validity, connectivity and operator privileges; no connection details are printed.');
   process.exitCode = 1;

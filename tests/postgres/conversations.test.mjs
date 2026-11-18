@@ -171,6 +171,7 @@ test('failed PostgreSQL row insertion rolls back sequence and revision allocatio
   await admin.query(`CREATE FUNCTION uap.${quote(triggerName)}() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN
     IF NEW.body->>'rollbackTest'='reject' THEN RAISE EXCEPTION 'intentional test insert rejection'; END IF; RETURN NEW; END; $function$`);
   try {
+    await admin.query(`REVOKE ALL ON FUNCTION uap.${quote(triggerName)}() FROM PUBLIC`);
     await admin.query(`CREATE TRIGGER ${quote(triggerName)} BEFORE INSERT ON uap.message_rows FOR EACH ROW EXECUTE FUNCTION uap.${quote(triggerName)}()`);
     const before = await repository.getCurrentConversation(scopeA, agentId);
     await assert.rejects(repository.appendRow(scopeA, { agentId, generation: 1, kind: 'event', body: { rollbackTest: 'reject' } }), /intentional test insert rejection/);

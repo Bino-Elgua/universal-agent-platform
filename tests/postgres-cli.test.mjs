@@ -25,6 +25,7 @@ test('operator CLI help, inspection and dry-run work without application secrets
     const help = await cli(['--help']);
     assert.equal(help.code, 0, help.stderr);
     assert.match(help.stdout, /running application still uses SQLite/);
+    assert.match(help.stdout, /grant-job-worker --role <separate-worker-login>/);
     const { sourcePath, options } = createImportSource(dir, 'cli');
     const inspected = await cli(['inspect-sqlite', '--source', sourcePath]);
     assert.equal(inspected.code, 0, inspected.stderr);

@@ -1,4 +1,4 @@
-# Implementation evidence — updated 2026-11-16
+# Implementation evidence — updated 2026-11-18
 
 Specification: [Master Blueprint v2](master-blueprint-v2.md). This checkout is an in-development single-owner self-hosted foundation. It is not a commercial release or a completed multi-tenant platform.
 
@@ -8,7 +8,7 @@ Specification: [Master Blueprint v2](master-blueprint-v2.md). This checkout is a
 | --- | --- | --- |
 | WP-01 | Exact Bot HQ baseline, clean installation, build/typecheck, lockfile license metadata inventory; six candidate source checkouts statically inspected and pinned | Live upstream provider E2Es, complete dependency/model/asset rights review, missing OKF source and custom Agency fork |
 | WP-02 | Original geometric badges for all 25 persisted shape IDs, activity states/reduced motion, neutral theme/favicon/package identifiers, licensed Lucide glyphs; excluded artwork removed; browser preference compatibility | Final commercial brand/domain and rights clearance; avatar uploads/moderation not implemented |
-| WP-03 | Single-owner safeguards; six checksummed transactional SQLite migrations; PostgreSQL metadata/session/conversation repositories, FORCE RLS, separated issuer credentials, authenticated read-API tests, safe source inspection and idempotent metadata/history staging | Durable jobs/runtime repositories, auth-provider integration and full API cutover, complete account export/import, restore rehearsal and tenant-isolated runtimes |
+| WP-03 | Single-owner safeguards; six checksummed transactional SQLite migrations; PostgreSQL metadata/session/conversation/task/job/approval repositories, FORCE RLS, separated issuer/worker credentials, authenticated read-API tests, safe source inspection and idempotent metadata/history staging | External job executor and tool-boundary enforcement, auth-provider integration and full API cutover, complete account export/import, restore rehearsal and tenant-isolated runtimes |
 | WP-04 | Optional credential boot, lazy clients, pre-I/O configuration guards, truthful health configuration states, disabled-provider tool/UI gating, real voice catalog error/retry, no fabricated options | Full versioned registry/conformance, per-tenant encrypted credentials, capability probes, budget/entitlement grants and live provider testing |
 | WP-05 | Sticky external-primary binding, protected primary files/process, managed path/process ownership checks, opt-in credential inheritance; gateway-only default model reporting | Authorized remote pairing/tunnel, revocation, managed hosting, live Hermes acceptance, supported authorized gateway model mutation |
 
@@ -58,7 +58,7 @@ Original node badges, Lucide glyphs and a neutral palette replace excluded artwo
 
 - `npm run typecheck`: passed.
 - `npm test`: **54 passed**, 0 failed (the original 29 plus storage migration, source/CLI and test-harness cases). Includes real isolated SQLite/API/startup tests and clearly identified unit-only SDK/local gateway fixtures. No live provider credentials were used.
-- `npm run test:postgres`: **54 passed**, 0 failed, against actual PostgreSQL 16.16. Each test file uses a separate temporary database and nonprivileged login; generated roles/databases and the disposable container were removed. Image ID `sha256:3cbd775daa28461ef484ed88ca1e5a5a72ff126e196deeebce6fec764edf1200`; pinned registry digest and operator instructions are in the storage guide.
+- `npm run test:postgres`: **78 passed**, 0 failed, against actual PostgreSQL 16.16. Each test file uses a separate temporary database and distinct nonprivileged application/session-issuer/job-worker logins as needed; generated roles/databases and the disposable container were removed. Image ID `sha256:3cbd775daa28461ef484ed88ca1e5a5a72ff126e196deeebce6fec764edf1200`; pinned registry digest and operator instructions are in the storage guide.
 - `npm run build`: passed for web and server.
 - `npm run audit:branding`: passed; excludes 69 upstream artifact hashes from source/public/build paths. This is distribution hygiene, not trademark/legal clearance.
 - `npm run test:browser`: actual Chromium against the compiled local server, real HTTP/session/SQLite and original UI, with temporary data. Covers owner link login, provider gating, read-only Hermes display, primary protection, identity after reload, missing assets/runtime errors and a 390px viewport.
@@ -72,7 +72,7 @@ Not run: original `tests/e2e.mjs` / `tests/voice-call.mjs` against real Hermes/O
 
 ## Next implementation dependencies
 
-1. Continue PostgreSQL tasks/approvals/jobs and runtime records, then auth-provider integration and complete API cutover. Session-authenticated HTTP read isolation and direct database denial are tested; the legacy UI/API, full write path and runtime authority remain on SQLite.
+1. Integrate the PostgreSQL task/approval repositories with a separately deployed executor, enforcing current membership, policy, budget and tool grants at every side-effect boundary; then complete auth-provider integration and the API cutover. Session-authenticated HTTP read isolation and direct database denial are tested; the legacy UI/API and runtime authority remain on SQLite.
 2. Implement scoped provider connections, registry contracts and worker-boundary policy/budget enforcement; replace shared-runtime authority before enabling hosted accounts.
 3. Implement and verify authorized Hermes pairing against the pinned real runtime, then complete computer/voice/connector conformance.
 4. Continue the audited SID/role/security/media/lab adapters in the blueprint's order. Parallax demo credit/mock/alternate-reasoning paths must not be copied into production; Cloud Attack Range needs durable expiry/verified teardown, not only expiration metadata.
@@ -98,3 +98,13 @@ A separate issuer login can create/revoke sessions without metadata privileges. 
 The `stage-history` operator command now preserves historical/current generations and LLM indices from a verified offline source, requires the matching foundation import, and records distinct receipts/unmapped counts. Historical approval cards never become grants; active sessions, turns, runtime and provider credentials remain excluded. Exact JSONB comparisons detect numeric tampering hidden by JavaScript rounding. Source/target byte limits account for PostgreSQL canonical formatting.
 
 Validation for this continuation: 54 local tests, 54 real-PostgreSQL tests, TypeScript checks, production build and branding audit passed. Actual PostgreSQL HTTP tests include expired/revoked tokens, suspended membership, foreign-tenant IDs, separate issuer access and privilege drift; source tests cover ambiguity and WAL immutability. Disposable database/role/container cleanup completed. Migration review caught and corrected a legacy-kind constraint mismatch and response page sizing before recording these results. No real auth provider, managed tenant runtime, merchant or production deployment was used.
+
+## Durable task runtime continuation — 2026-11-18
+
+Two append-only PostgreSQL migrations now add tenant-scoped tasks, queued jobs, fenced agent runs, approvals and causal job events. The repositories implement idempotent enqueueing, database-clock leases, hashed one-time lease tokens, heartbeats, cancellation, bounded retries, dead-letter/incomplete outcomes and resumable human approval. Approval action digests bind the exact requested action; consumed side effects force uncertain retries into reconciliation rather than automatic replay. Paid/reserved execution remains deliberately unclaimable until budget enforcement exists.
+
+A separate direct `NOINHERIT` worker login receives no table or session privileges and can execute only five fixed-search-path transition functions. Application and worker privilege drift is rejected. Claims recheck current requester membership, approval consumption rechecks requester and approver authority, per-agent concurrency is serialized, and expired approvals remain unclaimable even beyond the bounded cleanup batch. FORCE RLS behavior was also exercised with an ordinary non-superuser migration owner.
+
+Validation for this continuation: 54 local tests, 78 real-PostgreSQL tests, TypeScript checks, production builds and the branding audit passed. PostgreSQL coverage includes stale/null fencing, lease recovery, cancellation races, membership revocation, approval expiry backlogs, multi-action reconciliation, paid-job denial and role separation. Generated databases and roles plus the disposable PostgreSQL container were removed.
+
+This is a durable storage and transition boundary, not an executing hosted runtime. The default server and UI still use SQLite, the PostgreSQL read API remains unmounted, and no external job process, provider call, policy/budget service, tool sandbox or production deployment was added. An executor must revalidate authorization at each tool boundary because revoking membership after a process has claimed work cannot itself terminate that external process.

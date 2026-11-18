@@ -117,6 +117,25 @@ export async function grantApplicationRole(pool: Pool, role: string): Promise<vo
       WHERE pg_has_role($1::oid,candidate.oid,'MEMBER') AND
         has_table_privilege(candidate.oid,'uap.auth_sessions','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') LIMIT 1`, [application.oid]);
     if (issuerRights.rowCount) throw new PostgresMigrationError('Application role inherits unsupported schema/table privileges or session issuance rights; separate credentials are required.');
+    const workerRights = await client.query(`SELECT 1 FROM pg_roles candidate
+      WHERE pg_has_role($1::oid,candidate.oid,'MEMBER') AND EXISTS (
+        SELECT 1 FROM pg_proc function JOIN pg_namespace namespace ON namespace.oid=function.pronamespace
+        WHERE namespace.nspname='uap'
+          AND function.proname<>ALL(ARRAY['has_org_role','authenticate_session','revoke_session','enqueue_task_job','request_task_job_cancellation','resolve_task_approval'])
+          AND has_function_privilege(candidate.oid,function.oid,'EXECUTE')
+      ) LIMIT 1`, [application.oid]);
+    if (workerRights.rowCount) throw new PostgresMigrationError('Application role must not inherit job-worker execution authority; separate credentials are required.');
+    const applicationFunctions = await client.query<{ identity: string; secure: boolean }>(`SELECT
+        format('%I.%I(%s)',namespace.nspname,function.proname,pg_get_function_identity_arguments(function.oid)) AS identity,
+        function.prosecdef AND function.provolatile='v'
+          AND function.proconfig @> ARRAY['search_path=pg_catalog, uap','row_security=on']::text[] AS secure
+      FROM pg_proc function JOIN pg_namespace namespace ON namespace.oid=function.pronamespace
+      WHERE namespace.nspname='uap'
+        AND function.proname=ANY(ARRAY['enqueue_task_job','request_task_job_cancellation','resolve_task_approval'])
+      ORDER BY function.proname,function.oid`);
+    if (applicationFunctions.rows.length !== 3 || applicationFunctions.rows.some(fn => !fn.secure)) {
+      throw new PostgresMigrationError('Durable task transition functions are missing or unsafe; apply verified migrations before granting the application role.');
+    }
     await client.query(`REVOKE ALL ON SCHEMA uap FROM ${quoted}`);
     await client.query(`REVOKE ALL ON ALL TABLES IN SCHEMA uap FROM ${quoted}`);
     await client.query(`REVOKE ALL ON ALL FUNCTIONS IN SCHEMA uap FROM ${quoted}`);
@@ -125,7 +144,9 @@ export async function grantApplicationRole(pool: Pool, role: string): Promise<vo
     await client.query(`GRANT INSERT,UPDATE,DELETE ON uap.workspaces,uap.agents TO ${quoted}`);
     await client.query(`GRANT SELECT,INSERT,UPDATE ON uap.conversations,uap.message_rows TO ${quoted}`);
     await client.query(`GRANT SELECT,INSERT ON uap.llm_items TO ${quoted}`);
+    await client.query(`GRANT SELECT ON uap.tasks,uap.task_jobs,uap.agent_runs,uap.approvals,uap.job_events TO ${quoted}`);
     await client.query(`GRANT EXECUTE ON FUNCTION uap.has_org_role(text,text[]),uap.authenticate_session(text),uap.revoke_session(text) TO ${quoted}`);
+    for (const fn of applicationFunctions.rows) await client.query(`GRANT EXECUTE ON FUNCTION ${fn.identity} TO ${quoted}`);
     // Direct revocation does not remove privileges inherited from another role.
     // Reject such a configuration instead of pretending least privilege was set.
     const forbidden = await client.query(`SELECT 1 FROM pg_roles AS candidate
@@ -142,6 +163,17 @@ export async function grantApplicationRole(pool: Pool, role: string): Promise<vo
       has_table_privilege(candidate.oid,'uap.llm_items','UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
       has_table_privilege(candidate.oid,'uap.auth_sessions','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
       has_table_privilege(candidate.oid,'uap.history_import_receipts','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
+      has_table_privilege(candidate.oid,'uap.tasks','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
+      has_table_privilege(candidate.oid,'uap.task_jobs','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
+      has_table_privilege(candidate.oid,'uap.agent_runs','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
+      has_table_privilege(candidate.oid,'uap.approvals','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
+      has_table_privilege(candidate.oid,'uap.job_events','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR
+      EXISTS (
+        SELECT 1 FROM pg_proc function JOIN pg_namespace namespace ON namespace.oid=function.pronamespace
+        WHERE namespace.nspname='uap'
+          AND function.proname<>ALL(ARRAY['has_org_role','authenticate_session','revoke_session','enqueue_task_job','request_task_job_cancellation','resolve_task_approval'])
+          AND has_function_privilege(candidate.oid,function.oid,'EXECUTE')
+      ) OR
       has_schema_privilege(candidate.oid,'uap','CREATE')) LIMIT 1`, [application.oid]);
     if (forbidden.rowCount) throw new PostgresMigrationError('Application role inherits unsupported schema/table privileges; isolate it before granting access.');
     await client.query('COMMIT');
